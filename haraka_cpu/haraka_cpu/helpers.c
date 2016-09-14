@@ -20,21 +20,21 @@ void printbytes(unsigned char *m, int len) {
 	printf("%02x\n", m[len - 1]);
 }
 
-void printstate512(__m128i a, __m128i b, __m128i c, __m128i d) {
-uint8_t *A = (uint8_t*)&a;
-uint8_t *B = (uint8_t*)&b;
-uint8_t *C = (uint8_t*)&c;
-uint8_t *D = (uint8_t*)&d;
-
-int i;
-for (i = 0; i < 4; ++i)
-printf("%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
-A[i], A[i+4], A[i+8], A[i+12],
-B[i], B[i+4], B[i+8], B[i+12],
-C[i], C[i+4], C[i+8], C[i+12],
-D[i], D[i+4], D[i+8], D[i+12]);
-printf("\n");
-}
+//void printstate512(__m128i a, __m128i b, __m128i c, __m128i d) {
+//uint8_t *A = (uint8_t*)&a;
+//uint8_t *B = (uint8_t*)&b;
+//uint8_t *C = (uint8_t*)&c;
+//uint8_t *D = (uint8_t*)&d;
+//
+//int i;
+//for (i = 0; i < 4; ++i)
+//printf("%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+//A[i], A[i+4], A[i+8], A[i+12],
+//B[i], B[i+4], B[i+8], B[i+12],
+//C[i], C[i+4], C[i+8], C[i+12],
+//D[i], D[i+4], D[i+8], D[i+12]);
+//printf("\n");
+//}
 
 void printstate256(__m128i a, __m128i b) {
 	uint8_t *A = (uint8_t*)&a;
