@@ -9,6 +9,8 @@
 #include <assert.h>
 
 #define AES_MAXNR 14
+#define AES_COARSE
+
 struct aes_key_st {
 	uint32_t rd_key[4 * (AES_MAXNR + 1)];
 	int rounds;
@@ -669,68 +671,32 @@ int AES_cuda_set_encrypt_key(const unsigned char *userKey, const int bits, AES_K
 	int i = 0;
 	uint32_t temp;
 
-	if (!userKey || !key) return -1;
+	if (!userKey || !key)
+		return -1;
 
-	if (bits != 128 && bits != 192 && bits != 256) return -2;
+	if (bits != 128)
+		return -2;
 
 	rk = key->rd_key;
-
-	if (bits == 128) key->rounds = 10;
-	else if (bits == 192) key->rounds = 12;
-	else key->rounds = 14;
+	key->rounds = 10;
 
 	rk[0] = GETU32(userKey);
 	rk[1] = GETU32(userKey + 4);
 	rk[2] = GETU32(userKey + 8);
 	rk[3] = GETU32(userKey + 12);
-	if (bits == 128) {
-		while (1) {
-			temp = rk[3];
-			rk[4] = rk[0] ^ (Te4[(temp >> 8) & 0xff]) ^ (Te4[(temp >> 16) & 0xff] << 8) ^
-				(Te4[(temp >> 24)] << 16) ^ (Te4[(temp)& 0xff] << 24) ^ rcon[i];
-			rk[5] = rk[1] ^ rk[4];
-			rk[6] = rk[2] ^ rk[5];
-			rk[7] = rk[3] ^ rk[6];
-			if (++i == 10) return 0;
-			rk += 4;
-		}
-	}
-	rk[4] = GETU32(userKey + 16);
-	rk[5] = GETU32(userKey + 20);
-	if (bits == 192) {
-		while (1) {
-			temp = rk[5];
-			rk[6] = rk[0] ^ (Te4[(temp >> 8) & 0xff]) ^ (Te4[(temp >> 16) & 0xff] << 8) ^
-				(Te4[(temp >> 24)] << 16) ^ (Te4[(temp)& 0xff] << 24) ^ rcon[i];
-			rk[7] = rk[1] ^ rk[6];
-			rk[8] = rk[2] ^ rk[7];
-			rk[9] = rk[3] ^ rk[8];
-			if (++i == 8) return 0;
-			rk[10] = rk[4] ^ rk[9];
-			rk[11] = rk[5] ^ rk[10];
-			rk += 6;
-		}
-	}
-	rk[6] = GETU32(userKey + 24);
-	rk[7] = GETU32(userKey + 28);
-	if (bits == 256) {
-		while (1) {
-			temp = rk[7];
-			rk[8] = rk[0] ^ (Te4[(temp >> 8) & 0xff]) ^ (Te4[(temp >> 16) & 0xff] << 8) ^
-				(Te4[(temp >> 24)] << 16) ^ (Te4[(temp)& 0xff] << 24) ^ rcon[i];
-			rk[9] = rk[1] ^ rk[8];
-			rk[10] = rk[2] ^ rk[9];
-			rk[11] = rk[3] ^ rk[10];
-			if (++i == 7) return 0;
-			temp = rk[11];
-			rk[12] = rk[4] ^ (Te4[(temp)& 0xff]) ^ (Te4[(temp >> 8) & 0xff] << 8) ^
-				(Te4[(temp >> 16) & 0xff] << 16) ^ (Te4[(temp >> 24)] << 24);
-			rk[13] = rk[5] ^ rk[12];
-			rk[14] = rk[6] ^ rk[13];
-			rk[15] = rk[7] ^ rk[14];
 
-			rk += 8;
-		}
+	while (1) {
+		temp = rk[3];
+		rk[4] = rk[0] ^ (Te4[(temp >> 8) & 0xff]) ^ (Te4[(temp >> 16) & 0xff] << 8) ^
+			(Te4[(temp >> 24)] << 16) ^ (Te4[(temp)& 0xff] << 24) ^ rcon[i];
+		rk[5] = rk[1] ^ rk[4];
+		rk[6] = rk[2] ^ rk[5];
+		rk[7] = rk[3] ^ rk[6];
+
+		if (++i == 10) 
+			return 0;
+
+		rk += 4;
 	}
 	return 0;
 }
@@ -884,9 +850,9 @@ uint8_t  *h_iv;
 __global__ void AES128encKernel(DATA_TYPE data[]) {
 
 	GLOBAL_LOAD_SHARED_SETUP
-		COPY_CONSTANT_SHARED_ENC
+	COPY_CONSTANT_SHARED_ENC
 
-		AES_ENC_ROUND(4, t, s);
+	AES_ENC_ROUND(4, t, s);
 	AES_ENC_ROUND(8, s, t);
 	AES_ENC_ROUND(12, t, s);
 	AES_ENC_ROUND(16, s, t);
@@ -960,12 +926,12 @@ __global__ void AES128encKernel(DATA_TYPE data[]) {
 			load = ((uint64_t)s2) | ((uint64_t)s3) << 32; \
 			load ^= d_iv[1]; \
 			data_out[1] = load; \
-				} else { \
+		} else { \
 			load = ((uint64_t)s0 | (((uint64_t)s1) << 32)) ^ data[2*(TX-1)]; \
 			data_out[2*TX] = load; \
 			load = ((uint64_t)s2 | (((uint64_t)s3) << 32)) ^ data[2*(TX-1)+1]; \
 			data_out[2*TX+1] = load; \
-				}
+		}
 
 #else
 
@@ -997,18 +963,18 @@ __global__ void AES128encKernel(DATA_TYPE data[]) {
 __global__ void AES128decKernel(DATA_TYPE data[]) {
 
 	GLOBAL_LOAD_SHARED_SETUP
-		COPY_CONSTANT_SHARED_DEC
+	COPY_CONSTANT_SHARED_DEC
 
-		AES_DEC_ROUND(4, t, s)
-		AES_DEC_ROUND(8, s, t)
-		AES_DEC_ROUND(12, t, s)
-		AES_DEC_ROUND(16, s, t)
-		AES_DEC_ROUND(20, t, s)
-		AES_DEC_ROUND(24, s, t)
-		AES_DEC_ROUND(28, t, s)
-		AES_DEC_ROUND(32, s, t)
-		AES_DEC_ROUND(36, t, s)
-		AES_FINAL_DEC_ROUND(40)
+	AES_DEC_ROUND(4, t, s)
+	AES_DEC_ROUND(8, s, t)
+	AES_DEC_ROUND(12, t, s)
+	AES_DEC_ROUND(16, s, t)
+	AES_DEC_ROUND(20, t, s)
+	AES_DEC_ROUND(24, s, t)
+	AES_DEC_ROUND(28, t, s)
+	AES_DEC_ROUND(32, s, t)
+	AES_DEC_ROUND(36, t, s)
+	AES_FINAL_DEC_ROUND(40)
 }
 
 void AES_cuda_transfer_key_schedule(AES_KEY *ks) {
@@ -1045,54 +1011,26 @@ void AES_cuda_crypt(cuda_crypt_parameters *c) {
 	}
 #endif
 
-	CUDA_START_TIME
-
 	AES128encKernel << <gridSize, dimBlock >> >((DATA_TYPE *)c->d_in);
-	//AES128decKernel << <gridSize, dimBlock >> >((DATA_TYPE *)c->d_in);
-
-	CUDA_STOP_TIME("AES        ")
 
 	c->out = new uint8_t[AES_BLOCK_SIZE];
 	_CUDA(cudaMemcpyAsync(c->out, (uint32_t *)c->d_in, c->nbytes, cudaMemcpyDeviceToHost, 0));
 	_CUDA(cudaThreadSynchronize());
-	//transferDeviceToHost(c->out, (uint32_t *)c->d_out, c->host_data, c->host_data, c->nbytes);
-
+	cudaFree(c->d_in);
 }
 
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
-
-__global__ void addKernel(int *c, const int *a, const int *b)
-{
-    int i = threadIdx.x;
-    c[i] = a[i] + b[i];
-}
 
 int main()
 {
-	const int arraySize = 5;
-	const int a[arraySize] = { 1, 2, 3, 4, 5 };
-	const int b[arraySize] = { 10, 20, 30, 40, 50 };
-	int c[arraySize] = { 0 };
-
 	// Add vectors in parallel.
-	cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
+	//cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
+	cudaError_t cudaStatus = cudaSuccess;
+	cudaStatus = cudaSetDevice(0);
 	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "addWithCuda failed!");
+		fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
 		return 1;
 	}
 
-	printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
-		c[0], c[1], c[2], c[3], c[4]);
-
-	// cudaDeviceReset must be called before exiting in order for profiling and
-	// tracing tools such as Nsight and Visual Profiler to show complete traces.
-	cudaStatus = cudaDeviceReset();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceReset failed!");
-		return 1;
-	}
-
-	
 	//uint8_t userKey[AES_KEY_SIZE_128] = { 0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c };
 	//uint8_t userKey[AES_KEY_SIZE_128] = { 0x10, 0xa5, 0x88, 0x69, 0xd7, 0x4b, 0xe5, 0xa3, 0x74, 0xcf, 0x86, 0x7c, 0xfb, 0x47, 0x38, 0x59 };
 	//uint8_t userKey[AES_KEY_SIZE_128] = { 0xe2, 0x34, 0xcd, 0xca, 0x26, 0x06, 0xb8, 0x1f, 0x29, 0x40, 0x8d, 0x5f, 0x6d, 0xa2, 0x12, 0x06 };
@@ -1130,86 +1068,14 @@ int main()
 	delete c_param->out;
 	delete c_param;
 
+	// cudaDeviceReset must be called before exiting in order for profiling and
+	// tracing tools such as Nsight and Visual Profiler to show complete traces.
+	cudaStatus = cudaDeviceReset();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceReset failed!");
+		return 1;
+	}
+
 	while (1){}
     return 0;
-}
-
-// Helper function for using CUDA to add vectors in parallel.
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size)
-{
-    int *dev_a = 0;
-    int *dev_b = 0;
-    int *dev_c = 0;
-    cudaError_t cudaStatus;
-
-    // Choose which GPU to run on, change this on a multi-GPU system.
-    cudaStatus = cudaSetDevice(0);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-        goto Error;
-    }
-
-    // Allocate GPU buffers for three vectors (two input, one output)    .
-    cudaStatus = cudaMalloc((void**)&dev_c, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMalloc((void**)&dev_a, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMalloc((void**)&dev_b, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    // Copy input vectors from host memory to GPU buffers.
-    cudaStatus = cudaMemcpy(dev_a, a, size * sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMemcpy(dev_b, b, size * sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-    // Launch a kernel on the GPU with one thread for each element.
-    addKernel<<<1, size>>>(dev_c, dev_a, dev_b);
-
-    // Check for any errors launching the kernel
-    cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Error;
-    }
-    
-    // cudaDeviceSynchronize waits for the kernel to finish, and returns
-    // any errors encountered during the launch.
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
-        goto Error;
-    }
-
-    // Copy output vector from GPU buffer to host memory.
-    cudaStatus = cudaMemcpy(c, dev_c, size * sizeof(int), cudaMemcpyDeviceToHost);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-Error:
-    cudaFree(dev_c);
-    cudaFree(dev_a);
-    cudaFree(dev_b);
-    
-    return cudaStatus;
 }
