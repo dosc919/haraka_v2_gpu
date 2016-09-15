@@ -11,6 +11,6 @@ using namespace std;
 
 cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
 
-cudaError_t harakaCuda(const vector<unsigned char>& msg, vector<unsigned char>& digest);
+cudaError_t harakaCuda(const vector<char>& msg, vector<char>& digest);
 
 #endif

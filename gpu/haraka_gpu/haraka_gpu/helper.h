@@ -8,6 +8,6 @@
 
 using namespace std;
 
-void printVector(const string& message, const vector<unsigned char>& vec_to_print);
+void printVector(const string& message, const vector<char>& vec_to_print);
 
 #endif

@@ -94,10 +94,10 @@ Error:
 }
 
 
-cudaError_t harakaCuda(const vector<unsigned char>& msg, vector<unsigned char>& digest)
+cudaError_t harakaCuda(const vector<char>& msg, vector<char>& digest)
 {
 	for (int i = 0; i < digest.size(); ++i)
-		digest[i] = 0x77;
+		digest[i] = 0xFF;
 
 	return cudaSuccess;
 }
