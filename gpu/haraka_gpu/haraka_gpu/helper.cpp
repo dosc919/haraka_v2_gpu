@@ -12,9 +12,11 @@ void printVector(const string& message, const vector<char>& vec_to_print)
 	if (vec_to_print.empty())
 		return;
 
+	cout << "Size of Vector: " << vec_to_print.size() << " byte" << endl;
+
 	for (unsigned int i = 0; i < vec_to_print.size(); ++i)
 	{
-		cout << setw(2) << setfill('0') << hex << (int)vec_to_print[i] << " ";
+		printf("%02x ", (unsigned char)vec_to_print[i]);
 
 		if (!((i + 1) % 4))
 			cout << "  ";

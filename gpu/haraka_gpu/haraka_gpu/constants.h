@@ -15,8 +15,7 @@ const string ERROR_CUDA = ": cuda error occured during execution";
 const string ERROR_DIGEST_MISSMATCH = ": digest doesn't match with reference digest";
 
 const vector<string> TEST_FILES = {
-	"test_1.tst",
-	"blub"
+	"test_1.bin",
 };
 
 //Sizes
