@@ -76,7 +76,7 @@ const vector<string> testFunctionality()
 		printVector(OUTPUT_TEXT + "ref", digest_ref);
 
 		if (cuda_status != cudaSuccess)
-			errors.push_back(file_name +  ERROR_CUDA); //TODO exact cuda error...
+			errors.push_back(file_name +  ERROR_CUDA);
 		
 		if (memcmp(&digest[0], &digest_ref[0], DIGEST_SIZE_BYTE))
 			errors.push_back(file_name + ERROR_DIGEST_MISSMATCH);
@@ -89,28 +89,6 @@ const vector<string> testFunctionality()
 
 int main()
 {
-	const int arraySize = 5;
-	const int a[arraySize] = { 1, 2, 3, 4, 5 };
-	const int b[arraySize] = { 10, 20, 30, 40, 50 };
-	int c[arraySize] = { 0 };
-
-	// Add vectors in parallel.
-	cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "addWithCuda failed!");
-		return 1;
-	}
-
-	printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
-		c[0], c[1], c[2], c[3], c[4]);
-
-	// cudaDeviceReset must be called before exiting in order for profiling and
-	// tracing tools such as Nsight and Visual Profiler to show complete traces.
-	cudaStatus = cudaDeviceReset();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceReset failed!");
-		return 1;
-	}
 
 #ifdef TEST_PERFORMANCE
 	testPerformance();
@@ -130,6 +108,15 @@ int main()
 			cout << msg << endl;
 	}
 #endif
+
+	// cudaDeviceReset must be called before exiting in order for profiling and
+	// tracing tools such as Nsight and Visual Profiler to show complete traces.
+	cudaError_t cudaStatus = cudaDeviceReset();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceReset failed!");
+		while (1){}
+		return 1;
+	}
 
 	//ofstream test("test_1.bin", std::ios::out| ios::binary);
 	//if (!test.good())
