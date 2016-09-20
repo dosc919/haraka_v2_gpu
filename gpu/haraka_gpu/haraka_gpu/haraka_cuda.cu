@@ -352,7 +352,7 @@ RC(__device__, RC);
 		D##W ^= TE(1)[(S##X >>  8) & 0xff]; \
 		D##W ^= TE(2)[(S##Y >> 16) & 0xff]; \
 		D##W ^= TE(3)[ S##Z >> 24        ]; \
-		D##W ^= RConst[n+W];
+		D##W ^= RConst[n+3-W];
 
 //#define AES_FINAL_ENC_STEP(N,W,X,Y,Z) \
 //		s##W  = TE(2)[ t##W        & 0xff] & 0x000000ff; \
@@ -366,17 +366,17 @@ RC(__device__, RC);
 		s##W ^= TE(1)[(t##X >>  8) & 0xff]; \
 		s##W ^= TE(2)[(t##Y >> 16) & 0xff]; \
 		s##W ^= TE(3)[(t##Z >> 24)       ]; \
-		s##W ^= RConst[N+W]; \
+		s##W ^= RConst[N+3-W]; \
 
 #define AES_FINAL_ENC_ROUND(N) \
 		AES_FINAL_ENC_STEP(N,0,1,2,3); \
 		AES_FINAL_ENC_STEP(N,1,2,3,0); \
 		load = s0 | ((uint64_t)s1) << 32; \
-		if(threadIdx.x == 0) data[2*TX] = load; \
+		data[2*TX] = load; \
 		AES_FINAL_ENC_STEP(N,2,3,0,1); \
 		AES_FINAL_ENC_STEP(N,3,0,1,2); \
 		load = s2 | ((uint64_t)s3) << 32; \
-		if(threadIdx.x == 0) data[2*TX+1] = load; 
+		data[2*TX+1] = load; 
 
 #define TX (__umul24(blockIdx.x,blockDim.x) + threadIdx.x)
 #define SX (threadIdx.x)
@@ -456,7 +456,10 @@ __global__ void haraka512Kernel(uint64_t data[]) {
 	COPY_CONSTANT_SHARED_ENC
 	COPY_RC_CONSTANT_SHARED
 
-	AES_ENC_ROUND(0, t, s);
+	if (SX > 3)
+		return;
+
+	AES_ENC_ROUND(SX * 4, t, s);
 	//AES_ENC_ROUND(8, s, t);
 	//AES_ENC_ROUND(12, t, s);
 	//AES_ENC_ROUND(16, s, t);
@@ -465,7 +468,7 @@ __global__ void haraka512Kernel(uint64_t data[]) {
 	//AES_ENC_ROUND(28, t, s);
 	//AES_ENC_ROUND(32, s, t);
 	//AES_ENC_ROUND(36, t, s);
-	AES_FINAL_ENC_ROUND(8);
+	AES_FINAL_ENC_ROUND(SX * 4 + 16);
 }
 
 

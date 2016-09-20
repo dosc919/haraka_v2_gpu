@@ -14,14 +14,15 @@ void printVector(const string& message, const vector<char>& vec_to_print)
 
 	cout << "Size of Vector: " << vec_to_print.size() << " byte" << endl;
 
-	for (unsigned int i = 0; i < vec_to_print.size(); ++i)
+	for (unsigned int i = 0; i < 4; ++i)
 	{
-		printf("%02x ", (unsigned char)vec_to_print[i]);
+		for (unsigned int j = i; j < vec_to_print.size(); j += 4)
+		{
+			printf("%02x ", (unsigned char)vec_to_print[j]);
 
-		if (!((i + 1) % 4))
-			cout << "  ";
-
-		if (!((i + 1) % (vec_to_print.size() / 4)))
-			cout << endl;
+			if (!(((j - i) / 4 + 1) % 4))
+				cout << "  ";
+		}
+		cout << endl;
 	}
 }

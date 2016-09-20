@@ -69,7 +69,7 @@ const vector<string> testFunctionality()
 
 		printVector(INPUT_TEXT, input);
 
-		vector<char> digest(DIGEST_SIZE_BYTE);
+		vector<char> digest(DIGEST_SIZE_BYTE * 2); //TODO change back after debugging
 		cudaError_t cuda_status = harakaCuda(input, digest);
 
 		printVector(OUTPUT_TEXT, digest);
