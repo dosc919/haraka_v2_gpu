@@ -11,8 +11,10 @@
 
 using namespace std;
 
-//#define TEST_PERFORMANCE
-#define TEST_FUNCTIONALITY
+#define TEST_PERFORMANCE
+#define NUM_MESSAGES 4194304
+
+//#define TEST_FUNCTIONALITY
 
 int testPerformance()
 {
@@ -23,15 +25,17 @@ int testPerformance()
 	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
 
 	auto gen = bind(dist, mersenne_engine);
-	vector<char> input(64);
+	vector<char> input(64 * NUM_MESSAGES);
 	generate(begin(input), end(input), gen);
 
-	printVector(INPUT_TEXT, input);
-
-	vector<char> digest(32);
+	vector<char> digest(32 * NUM_MESSAGES);
 	cudaError_t cuda_status = harakaCuda(input, digest);
 
-	printVector(OUTPUT_TEXT, digest);
+	//for (int i = 0; i < NUM_MESSAGES; ++i)
+	//{
+	//	printVector(INPUT_TEXT, vector<char>(&input[i * 64], &input[i * 64 + 63] + 1));
+	//	printVector(OUTPUT_TEXT, vector<char>(&digest[i * 32], &digest[i * 32 + 31] + 1));
+	//}
 
 	return cuda_status != cudaSuccess;
 }
@@ -118,6 +122,9 @@ int main()
 		return 1;
 	}
 
+#ifdef TEST_FUNCTIONALITY
+	while (1){}
+#endif
 	//ofstream test("test_1.bin", std::ios::out| ios::binary);
 	//if (!test.good())
 	//{
@@ -139,7 +146,5 @@ int main()
 
 	//test.close();
 
-
-	while (1){}
 	return 0;
 }

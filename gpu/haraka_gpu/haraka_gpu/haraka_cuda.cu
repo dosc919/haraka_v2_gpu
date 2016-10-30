@@ -7,8 +7,10 @@
 #include <stdint.h>
 
 #define AES_COARSE
+#define MIX_SHARED
+#define VECTOR_LOAD
 //#define T_TABLE_CONSTANT
-//#define RC_CONSTANT
+#define RC_CONSTANT
 
 
 #define Te0(space,suffix) space const uint32_t suffix[256] = { \
@@ -419,6 +421,7 @@ RC(__device__, RC);
 		Tes1[SX] = Te1[SX];\
 		Tes2[SX] = Te2[SX];\
 		Tes3[SX] = Te3[SX];\
+		COPY_RC_CONSTANT_SHARED\
 		__syncthreads();
 #endif
 
@@ -429,11 +432,20 @@ RC(__device__, RC);
 #define RConst RCs
 #define COPY_RC_CONSTANT_SHARED\
 	__shared__ uint32_t RCs[256];\
-	RCs[SX] = RC[SX];\
-	__syncthreads();
+	RCs[SX] = RC[SX];
 #endif
 
 #ifdef AES_COARSE
+#ifdef VECTOR_LOAD
+#define GLOBAL_LOAD_SHARED_SETUP \
+		register uint32_t t0, t1, t2, t3, s0, s1, s2, s3; \
+		register uint64_t load[2]; \
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[TX]; \
+		s0 = load[0]; \
+		s1 = load[0] >> 32; \
+		s2 = load[1]; \
+		s3 = load[1] >> 32; 
+#else
 #define GLOBAL_LOAD_SHARED_SETUP \
 		register uint32_t t0, t1, t2, t3, s0, s1, s2, s3; \
 		register uint64_t load; \
@@ -443,6 +455,7 @@ RC(__device__, RC);
 		load = msg[2*TX+1]; \
 		s2 = load; \
 		s3 = load >> 32; 
+#endif
 #else
 #define GLOBAL_LOAD_SHARED_SETUP \
 		__shared__ uint32_t t[MAX_THREAD]; \
@@ -451,110 +464,96 @@ RC(__device__, RC);
 #endif
 
 #define MIX(D, S)\
-	m0 = __shfl(S##3, 0);\
-	m1 = __shfl(S##3, 2);\
-	m2 = __shfl(S##3, 1);\
-	m3 = __shfl(S##3, 3);\
-	if (SX == 0)\
+	m1 = __shfl(S##3, SX - (SX % 4) + 2);\
+	m2 = __shfl(S##3, SX - (SX % 4) + 1);\
+	m3 = __shfl(S##3, SX - (SX % 4) + 3);\
+	if ((SX % 4) == 0)\
 	{\
-		D##0 = m0;\
+		D##0 = S##3;\
 		D##1 = m1;\
 		D##2 = m2;\
 		D##3 = m3;\
 	}\
 	\
-	m0 = __shfl(S##0, 2);\
-	m1 = __shfl(S##0, 0);\
-	m2 = __shfl(S##0, 3);\
-	m3 = __shfl(S##0, 1);\
-	if (SX == 1)\
+	m0 = __shfl(S##0, SX - (SX % 4) + 2);\
+	m1 = __shfl(S##0, SX - (SX % 4) + 0);\
+	m2 = __shfl(S##0, SX - (SX % 4) + 3);\
+	if ((SX % 4) == 1)\
 	{\
 		D##0 = m0;\
+		D##1 = m1;\
+		D##2 = m2;\
+		D##3 = S##0;\
+	}\
+	\
+	m1 = __shfl(S##1, SX - (SX % 4) + 0);\
+	m2 = __shfl(S##1, SX - (SX % 4) + 3);\
+	m3 = __shfl(S##1, SX - (SX % 4) + 1);\
+	if ((SX % 4) == 2)\
+	{\
+		D##0 = S##1;\
 		D##1 = m1;\
 		D##2 = m2;\
 		D##3 = m3;\
 	}\
 	\
-	m0 = __shfl(S##1, 2);\
-	m1 = __shfl(S##1, 0);\
-	m2 = __shfl(S##1, 3);\
-	m3 = __shfl(S##1, 1);\
-	if (SX == 2)\
+	m0 = __shfl(S##2, SX - (SX % 4) + 0);\
+	m1 = __shfl(S##2, SX - (SX % 4) + 2);\
+	m2 = __shfl(S##2, SX - (SX % 4) + 1);\
+	if ((SX % 4) == 3)\
 	{\
 		D##0 = m0;\
 		D##1 = m1;\
 		D##2 = m2;\
-		D##3 = m3;\
-	}\
-	\
-	m0 = __shfl(S##2, 0);\
-	m1 = __shfl(S##2, 2);\
-	m2 = __shfl(S##2, 1);\
-	m3 = __shfl(S##2, 3);\
-	if (SX == 3)\
-	{\
-		D##0 = m0;\
-		D##1 = m1;\
-		D##2 = m2;\
-		D##3 = m3;\
+		D##3 = S##2;\
 	}
 
-__global__ void haraka512Kernel(const uint64_t msg[], uint64_t digest[]) {
-
+__global__ void haraka512Kernel(const uint64_t* msg, uint64_t* digest, const uint32_t num_msgs)
+{
 	GLOBAL_LOAD_SHARED_SETUP
 	COPY_CONSTANT_SHARED_ENC
-	COPY_RC_CONSTANT_SHARED
 
-	if (SX > 3)
+	if (SX > (num_msgs * 4 - 1))
 		return;
 
 	uint32_t m0, m1, m2, m3;
 
-	AES_ENC_ROUND(SX * 4, t, s);
-	AES_ENC_ROUND(SX * 4 + 16, s, t);
+	AES_ENC_ROUND(SX % 4 * 4, t, s);
+	AES_ENC_ROUND(SX % 4 * 4 + 16, s, t);
 
 	MIX(t, s)
 
-	AES_ENC_ROUND(SX * 4 + 32, s, t);
-	AES_ENC_ROUND(SX * 4 + 48, t, s);
+	AES_ENC_ROUND(SX % 4 * 4 + 32, s, t);
+	AES_ENC_ROUND(SX % 4 * 4 + 48, t, s);
 
 	MIX(s, t)
 
-	AES_ENC_ROUND(SX * 4 + 64, t, s);
-	AES_ENC_ROUND(SX * 4 + 80, s, t);
+	AES_ENC_ROUND(SX % 4 * 4 + 64, t, s);
+	AES_ENC_ROUND(SX % 4 * 4 + 80, s, t);
 
 	MIX(t, s)
 
-	AES_ENC_ROUND(SX * 4 + 96, s, t);
-	AES_ENC_ROUND(SX * 4 + 112, t, s);
+	AES_ENC_ROUND(SX % 4 * 4 + 96, s, t);
+	AES_ENC_ROUND(SX % 4 * 4 + 112, t, s);
 
 	MIX(s, t)
 
-	AES_ENC_ROUND(SX * 4 + 128, t, s);
-	AES_ENC_ROUND(SX * 4 + 144, s, t);
+	AES_ENC_ROUND(SX % 4 * 4 + 128, t, s);
+	AES_ENC_ROUND(SX % 4 * 4 + 144, s, t);
 
 	MIX(t, s)
-
-
-	//load = s0 | ((uint64_t)s1) << 32;
-	//data[2 * TX] = load;
-
-	//load = s2 | ((uint64_t)s3) << 32;
-	//data[2 * TX + 1] = load;
 
 	if (SX & 2)
 	{
-		load = t0 | ((uint64_t)t1) << 32;
-		digest[TX] = load ^ msg[TX * 2];
+		load[0] ^= t0 | ((uint64_t)t1) << 32;
+		reinterpret_cast<uint2*>(digest)[TX] = reinterpret_cast<uint2*>(load)[0];
 	}
 	else
 	{
-		load = t2 | ((uint64_t)t3) << 32;
-		digest[TX] ^= load ^ msg[TX * 2 + 1];
+		load[0] = t2 | ((uint64_t)t3) << 32;
+		load[0] ^= load[1];
+		reinterpret_cast<uint2*>(digest)[TX] = reinterpret_cast<uint2*>(load)[0];
 	}
-
-
-	//t0 = ((s0 << (((3 + SX) % 4) * 8)) & 0xFF000000) >> ((SX & 1) * 24);
 }
 
 
@@ -574,6 +573,8 @@ inline void _checkCudaError(cudaError_t error, const char* file, const int line)
 
 cudaError_t harakaCuda(const vector<char>& msg, vector<char>& digest)
 {
+	assert(!(msg.size() % 64));
+
 	checkCudaError(cudaSetDevice(0));
 
 	char* msg_device;
@@ -585,23 +586,21 @@ cudaError_t harakaCuda(const vector<char>& msg, vector<char>& digest)
 
 	int gridSize;
 #ifdef AES_COARSE
-	gridSize = 16 / (MAX_THREAD*AES_BLOCK_SIZE);
+	gridSize = msg.size() / (MAX_THREAD*AES_BLOCK_SIZE);
 	if (!(msg.size() % (MAX_THREAD*AES_BLOCK_SIZE)) == 0)
-		gridSize = 16 / (MAX_THREAD*AES_BLOCK_SIZE) + 1;
+		gridSize = msg.size() / (MAX_THREAD*AES_BLOCK_SIZE) + 1;
 
 	dim3 dimBlock(MAX_THREAD);
 #else
 	dim3 dimBlock(STATE_THREAD_AES, MAX_THREAD / STATE_THREAD_AES);
-	if ((msg.size() % (MAX_THREAD*STATE_THREAD_AES)) == 0) {
+	if ((msg.size() % (MAX_THREAD*STATE_THREAD_AES)) == 0)
 		gridSize = msg.size() / (MAX_THREAD*STATE_THREAD_AES);
-	}
-	else {
+	else 
 		gridSize = msg.size() / (MAX_THREAD*STATE_THREAD_AES) + 1;
-	}
 #endif
 
 	//launch kernel
-	haraka512Kernel << <gridSize, dimBlock >> >((uint64_t *)msg_device, (uint64_t*)digest_device);
+	haraka512Kernel << <gridSize, dimBlock >> >((uint64_t *)msg_device, (uint64_t*)digest_device, msg.size() / 64);
 
 	checkCudaError(cudaGetLastError());
 
