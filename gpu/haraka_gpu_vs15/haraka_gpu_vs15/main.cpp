@@ -11,10 +11,10 @@
 
 using namespace std;
 
-#define TEST_PERFORMANCE
+//#define TEST_PERFORMANCE
 #define NUM_MESSAGES 4194304
 
-//#define TEST_FUNCTIONALITY
+#define TEST_FUNCTIONALITY
 
 int testPerformance()
 {

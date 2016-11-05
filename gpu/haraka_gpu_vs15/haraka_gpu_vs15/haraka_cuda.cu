@@ -8,7 +8,7 @@
 
 #define AES_COARSE
 #define MIX_SHARED
-#define VECTOR_LOAD
+#define HARAKA_COARSE
 //#define T_TABLE_CONSTANT
 //#define RC_CONSTANT
 
@@ -356,29 +356,6 @@ RC(__device__, RC);
 		D##W ^= TE(3)[ S##Z >> 24        ]; \
 		D##W ^= RConst[n+3-W];
 
-//#define AES_FINAL_ENC_STEP(N,W,X,Y,Z) \
-//		s##W  = TE(2)[ t##W        & 0xff] & 0x000000ff; \
-//		s##W ^= TE(3)[(t##X >>  8) & 0xff] & 0x0000ff00; \
-//		s##W ^= TE(0)[(t##Y >> 16) & 0xff] & 0x00ff0000; \
-//		s##W ^= TE(1)[(t##Z >> 24)       ] & 0xff000000; \
-//		s##W ^= RConst[N+W]; \
-
-#define AES_FINAL_ENC_STEP(N,W,X,Y,Z) \
-		s##W  = TE(0)[ t##W        & 0xff]; \
-		s##W ^= TE(1)[(t##X >>  8) & 0xff]; \
-		s##W ^= TE(2)[(t##Y >> 16) & 0xff]; \
-		s##W ^= TE(3)[(t##Z >> 24)       ]; \
-		s##W ^= RConst[N+3-W]; \
-
-#define AES_FINAL_ENC_ROUND(N) \
-		AES_FINAL_ENC_STEP(N,0,1,2,3); \
-		AES_FINAL_ENC_STEP(N,1,2,3,0); \
-		load = s0 | ((uint64_t)s1) << 32; \
-		data[2*TX] = load; \
-		AES_FINAL_ENC_STEP(N,2,3,0,1); \
-		AES_FINAL_ENC_STEP(N,3,0,1,2); \
-		load = s2 | ((uint64_t)s3) << 32; \
-		data[2*TX+1] = load; 
 
 #define TX (__umul24(blockIdx.x,blockDim.x) + threadIdx.x)
 #define SX (threadIdx.x)
@@ -417,10 +394,11 @@ RC(__device__, RC);
 		__shared__ uint32_t Tes1[256];\
 		__shared__ uint32_t Tes2[256];\
 		__shared__ uint32_t Tes3[256];\
+		if(TX < 256){\
 		Tes0[SX] = Te0[SX];\
 		Tes1[SX] = Te1[SX];\
 		Tes2[SX] = Te2[SX];\
-		Tes3[SX] = Te3[SX];\
+		Tes3[SX] = Te3[SX];}\
 		COPY_RC_CONSTANT_SHARED\
 		__syncthreads();
 #endif
@@ -432,29 +410,50 @@ RC(__device__, RC);
 #define RConst RCs
 #define COPY_RC_CONSTANT_SHARED\
 	__shared__ uint32_t RCs[256];\
+	if(TX <256)\
 	RCs[SX] = RC[SX];
 #endif
 
 #ifdef AES_COARSE
-#ifdef VECTOR_LOAD
+#ifdef HARAKA_COARSE
 #define GLOBAL_LOAD_SHARED_SETUP \
-		register uint32_t t0, t1, t2, t3, s0, s1, s2, s3; \
+		register uint32_t r0, r1, r2, r3; \
+		register uint32_t s0, s1, s2, s3; \
+		register uint32_t t0, t1, t2, t3; \
+		register uint32_t u0, u1, u2, u3; \
+		register uint32_t v0, v1, v2, v3; \
+		register uint64_t load[2]; \
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[4 * TX]; \
+		s0 = load[0]; \
+		s1 = load[0] >> 32; \
+		s2 = load[1]; \
+		s3 = load[1] >> 32; \
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[4 * TX + 1]; \
+		t0 = load[0]; \
+		t1 = load[0] >> 32; \
+		t2 = load[1]; \
+		t3 = load[1] >> 32;\
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[4 * TX + 2]; \
+		u0 = load[0]; \
+		u1 = load[0] >> 32; \
+		u2 = load[1]; \
+		u3 = load[1] >> 32;\
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[4 * TX + 3]; \
+		v0 = load[0]; \
+		v1 = load[0] >> 32; \
+		v2 = load[1]; \
+		v3 = load[1] >> 32;
+#else
+#define GLOBAL_LOAD_SHARED_SETUP \
+		register uint32_t s0, s1, s2, s3; \
+		register uint32_t t0, t1, t2, t3; \
+		register uint32_t m0, m1, m2, m3; \
 		register uint64_t load[2]; \
 		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[TX]; \
 		s0 = load[0]; \
 		s1 = load[0] >> 32; \
 		s2 = load[1]; \
-		s3 = load[1] >> 32; 
-#else
-#define GLOBAL_LOAD_SHARED_SETUP \
-		register uint32_t t0, t1, t2, t3, s0, s1, s2, s3; \
-		register uint64_t load; \
-		load = msg[2*TX]; \
-		s0 = load; \
-		s1 = load >> 32; \
-		load = msg[2*TX+1]; \
-		s2 = load; \
-		s3 = load >> 32; 
+		s3 = load[1] >> 32;  
 #endif
 #else
 #define GLOBAL_LOAD_SHARED_SETUP \
@@ -463,6 +462,35 @@ RC(__device__, RC);
 		s[SX] = data[__umul24(blockIdx.x,MAX_THREAD)+SX]; 
 #endif
 
+#ifdef HARAKA_COARSE
+#define MIX \
+	r0 = s0; \
+	r1 = s1; \
+	r2 = s2; \
+\
+	s0 = s3; \
+	s1 = u3; \
+	s2 = t3; \
+	s3 = v3; \
+\
+	t3 = t0; \
+	u3 = t1; \
+	v3 = v2; \
+\
+	t0 = u0; \
+	t1 = r0; \
+	v2 = t2; \
+\
+	u0 = u1; \
+	t2 = v0; \
+\
+	u1 = r1; \
+	v0 = r2; \
+	r3 = v1; \
+	v1 = u2; \
+	u2 = r3;
+	
+#else
 #define MIX(D, S)\
 	m1 = __shfl(S##3, SX - (SX % 4) + 2);\
 	m2 = __shfl(S##3, SX - (SX % 4) + 1);\
@@ -507,7 +535,102 @@ RC(__device__, RC);
 		D##2 = m2;\
 		D##3 = S##2;\
 	}
+#endif
 
+#ifdef HARAKA_COARSE
+__global__ void haraka512Kernel(const uint64_t* msg, uint64_t* digest, const uint32_t num_msgs)
+{
+	GLOBAL_LOAD_SHARED_SETUP
+	COPY_CONSTANT_SHARED_ENC
+
+	if (SX > (num_msgs - 1))
+		return;
+
+	AES_ENC_ROUND(0, r, s);
+	AES_ENC_ROUND(16, s, r);
+
+	AES_ENC_ROUND(1 * 4, r, t);
+	AES_ENC_ROUND(1 * 4 + 16, t, r);
+
+	AES_ENC_ROUND(2 * 4, r, u);
+	AES_ENC_ROUND(2 * 4 + 16, u, r);
+
+	AES_ENC_ROUND(3 * 4, r, v);
+	AES_ENC_ROUND(3 * 4 + 16, v, r);
+	
+	MIX
+
+	AES_ENC_ROUND(0 * 4 + 32, r, s);
+	AES_ENC_ROUND(0 * 4 + 48, s, r);
+
+	AES_ENC_ROUND(1 * 4 + 32, r, t);
+	AES_ENC_ROUND(1 * 4 + 48, t, r);
+
+	AES_ENC_ROUND(2 * 4 + 32, r, u);
+	AES_ENC_ROUND(2 * 4 + 48, u, r);
+
+	AES_ENC_ROUND(3 * 4 + 32, r, v);
+	AES_ENC_ROUND(3 * 4 + 48, v, r);
+
+	MIX
+
+	AES_ENC_ROUND(0 * 4 + 64, r, s);
+	AES_ENC_ROUND(0 * 4 + 80, s, r);
+
+	AES_ENC_ROUND(1 * 4 + 64, r, t);
+	AES_ENC_ROUND(1 * 4 + 80, t, r);
+
+	AES_ENC_ROUND(2 * 4 + 64, r, u);
+	AES_ENC_ROUND(2 * 4 + 80, u, r);
+
+	AES_ENC_ROUND(3 * 4 + 64, r, v);
+	AES_ENC_ROUND(3 * 4 + 80, v, r);
+
+	MIX
+
+	AES_ENC_ROUND(0 * 4 + 96, r, s);
+	AES_ENC_ROUND(0 * 4 + 112, s, r);
+
+	AES_ENC_ROUND(1 * 4 + 96, r, t);
+	AES_ENC_ROUND(1 * 4 + 112, t, r);
+
+	AES_ENC_ROUND(2 * 4 + 96, r, u);
+	AES_ENC_ROUND(2 * 4 + 112, u, r);
+
+	AES_ENC_ROUND(3 * 4 + 96, r, v);
+	AES_ENC_ROUND(3 * 4 + 112, v, r);
+
+	MIX
+
+	AES_ENC_ROUND(0 * 4 + 128, r, s);
+	AES_ENC_ROUND(0 * 4 + 144, s, r);
+
+	AES_ENC_ROUND(1 * 4 + 128, r, t);
+	AES_ENC_ROUND(1 * 4 + 144, t, r);
+
+	AES_ENC_ROUND(2 * 4 + 128, r, u);
+	AES_ENC_ROUND(2 * 4 + 144, u, r);
+
+	AES_ENC_ROUND(3 * 4 + 128, r, v);
+	AES_ENC_ROUND(3 * 4 + 144, v, r);
+
+	MIX
+
+	load[1] = s2 | ((uint64_t)s3) << 32;
+	digest[TX * 4] = load[1] ^ msg[8 * TX + 1];
+
+	load[1] = t2 | ((uint64_t)t3) << 32;
+	digest[TX * 4 + 1] = load[1] ^ msg[8 * TX + 3];
+
+	load[1] = u0 | ((uint64_t)u1) << 32;
+	digest[TX * 4 + 2] = load[1] ^ msg[8 * TX + 4];
+
+	load[1] = v0 | ((uint64_t)v1) << 32;
+	load[1] ^= load[0];
+
+	digest[TX * 4 + 3] = load[1];
+}
+#else
 __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* digest, const uint32_t num_msgs)
 {
 	GLOBAL_LOAD_SHARED_SETUP
@@ -516,45 +639,38 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* digest, const uin
 	if (SX > (num_msgs * 4 - 1))
 		return;
 
-	uint32_t m0, m1, m2, m3;
-
 	AES_ENC_ROUND(SX % 4 * 4, t, s);
 	AES_ENC_ROUND(SX % 4 * 4 + 16, s, t);
-
 	MIX(t, s)
 
 	AES_ENC_ROUND(SX % 4 * 4 + 32, s, t);
 	AES_ENC_ROUND(SX % 4 * 4 + 48, t, s);
-
 	MIX(s, t)
 
 	AES_ENC_ROUND(SX % 4 * 4 + 64, t, s);
 	AES_ENC_ROUND(SX % 4 * 4 + 80, s, t);
-
 	MIX(t, s)
 
 	AES_ENC_ROUND(SX % 4 * 4 + 96, s, t);
 	AES_ENC_ROUND(SX % 4 * 4 + 112, t, s);
-
 	MIX(s, t)
 
 	AES_ENC_ROUND(SX % 4 * 4 + 128, t, s);
 	AES_ENC_ROUND(SX % 4 * 4 + 144, s, t);
-
 	MIX(t, s)
 
-		if (SX & 2)
-		{
-			load[0] ^= t0 | ((uint64_t)t1) << 32;
-			reinterpret_cast<uint2*>(digest)[TX] = reinterpret_cast<uint2*>(load)[0];
-		}
-		else
-		{
-			load[0] = t2 | ((uint64_t)t3) << 32;
-			load[0] ^= load[1];
-			reinterpret_cast<uint2*>(digest)[TX] = reinterpret_cast<uint2*>(load)[0];
-		}
+	if (SX & 2)
+	{
+		load[0] ^= t0 | ((uint64_t)t1) << 32;
+	}
+	else
+	{
+		load[0] = t2 | ((uint64_t)t3) << 32;
+		load[0] ^= load[1];
+	}
+	reinterpret_cast<uint2*>(digest)[TX] = reinterpret_cast<uint2*>(load)[0];
 }
+#endif
 
 
 #define checkCudaError(x) _checkCudaError(x, __FILE__, __LINE__)
@@ -584,13 +700,21 @@ cudaError_t harakaCuda(const vector<char>& msg, vector<char>& digest)
 	char* digest_device;
 	checkCudaError(cudaMalloc((void**)&digest_device, digest.size() * sizeof(char)));
 
-	int gridSize;
+	size_t gridSize;
 #ifdef AES_COARSE
-	gridSize = msg.size() / (MAX_THREAD*AES_BLOCK_SIZE);
-	if (!(msg.size() % (MAX_THREAD*AES_BLOCK_SIZE)) == 0)
-		gridSize = msg.size() / (MAX_THREAD*AES_BLOCK_SIZE) + 1;
+	#ifdef HARAKA_COARSE
+		gridSize = msg.size() / (MAX_THREAD*AES_BLOCK_SIZE*4);
+		if (!(msg.size() % (MAX_THREAD*AES_BLOCK_SIZE*4)) == 0)
+			gridSize = msg.size() / (MAX_THREAD*AES_BLOCK_SIZE*4) + 1;
 
-	dim3 dimBlock(MAX_THREAD);
+		dim3 dimBlock(MAX_THREAD);
+	#else
+		gridSize = msg.size() / (MAX_THREAD*AES_BLOCK_SIZE);
+		if (!(msg.size() % (MAX_THREAD*AES_BLOCK_SIZE)) == 0)
+			gridSize = msg.size() / (MAX_THREAD*AES_BLOCK_SIZE) + 1;
+
+		dim3 dimBlock(MAX_THREAD);
+	#endif
 #else
 	dim3 dimBlock(STATE_THREAD_AES, MAX_THREAD / STATE_THREAD_AES);
 	if ((msg.size() % (MAX_THREAD*STATE_THREAD_AES)) == 0)
@@ -600,7 +724,7 @@ cudaError_t harakaCuda(const vector<char>& msg, vector<char>& digest)
 #endif
 
 	//launch kernel
-	for(int i = 0; i < 10; ++i)
+	for(int i = 0; i < 20; ++i)
 	haraka512Kernel << <gridSize, dimBlock >> >((uint64_t *)msg_device, (uint64_t*)digest_device, msg.size() / 64);
 
 	checkCudaError(cudaGetLastError());
