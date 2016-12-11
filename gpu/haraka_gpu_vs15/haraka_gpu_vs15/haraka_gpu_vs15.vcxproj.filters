@@ -17,19 +17,25 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="haraka_cuda.cu">
-      <Filter>Source</Filter>
-    </CudaCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="haraka_cuda.h">
-      <Filter>Header</Filter>
-    </ClInclude>
     <ClInclude Include="constants.h">
       <Filter>Header</Filter>
     </ClInclude>
     <ClInclude Include="helper.h">
       <Filter>Header</Filter>
     </ClInclude>
+    <ClInclude Include="haraka_cuda_w_options.h">
+      <Filter>Header</Filter>
+    </ClInclude>
+    <ClInclude Include="haraka_cuda.h">
+      <Filter>Header</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="haraka_cuda_w_options.cu">
+      <Filter>Source</Filter>
+    </CudaCompile>
+    <CudaCompile Include="haraka_cuda.cu">
+      <Filter>Source</Filter>
+    </CudaCompile>
   </ItemGroup>
 </Project>

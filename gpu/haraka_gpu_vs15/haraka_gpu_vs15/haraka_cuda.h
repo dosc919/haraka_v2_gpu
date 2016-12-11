@@ -9,7 +9,7 @@
 
 using namespace std;
 
-const unsigned int MAX_THREAD = 512;
+const unsigned int MAX_THREAD = 256;
 const unsigned int AES_BLOCK_SIZE = 16;
 const unsigned int STATE_THREAD_AES = 4;
 

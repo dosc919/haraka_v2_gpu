@@ -7,6 +7,7 @@
 //Strings
 const string INPUT_TEXT = "Input:";
 const string OUTPUT_TEXT = "Digest:";
+const string OUTPUT_REFERENCE_TEXT = "Digest Reference:";
 
 const string ERROR_FILE_OPEN = ": file cannot be opened";
 const string ERROR_FILE_READ_INPUT = ": input for hash function cannot be read";
