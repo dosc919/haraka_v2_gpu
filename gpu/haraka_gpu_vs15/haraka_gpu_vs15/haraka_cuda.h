@@ -9,10 +9,26 @@
 
 using namespace std;
 
-const unsigned int MAX_THREAD = 256;
-const unsigned int AES_BLOCK_SIZE = 16;
-const unsigned int STATE_THREAD_AES = 4;
+//Cuda defines
+const uint32_t MAX_THREAD = 256;
+const uint32_t NUM_STREAMS = 16;
 
+//Haraka defines
+const uint32_t AES_BLOCK_SIZE = 16;
+const uint32_t STATE_THREAD_AES = 4;
+const uint32_t HASH_SIZE_BYTE = 32;
+const uint32_t MSG_SIZE_BYTE = 64;
+
+//Winternitz OTS defines
+const uint32_t NUM_DIGEST_BITS = 128;
+const uint32_t WINTERNITZ_PARAM = 32;
+const uint32_t T1 = (NUM_DIGEST_BITS + WINTERNITZ_PARAM - 1) / WINTERNITZ_PARAM;
+const uint32_t T2 = (int(log2f(T1)) + WINTERNITZ_PARAM + WINTERNITZ_PARAM) / WINTERNITZ_PARAM;
+const uint32_t T = T1 + T2;
+
+//functions
 cudaError_t harakaCuda(const vector<char>& msg, vector<char>& digest);
+
+int harakaWinternitzCuda(const char* msgs, char* signatures, const uint32_t num_msgs);
 
 #endif
