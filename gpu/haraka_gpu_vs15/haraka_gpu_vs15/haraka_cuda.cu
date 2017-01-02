@@ -8,6 +8,8 @@
 #include <Windows.h>
 #include <wincrypt.h>
 
+#define CUDA_MANAGED_FORCE_DEVICE_ALLOC 1
+
 
 __device__ const uint32_t Te0[256] = { \
 	0xa56363c6U, 0x847c7cf8U, 0x997777eeU, 0x8d7b7bf6U,\
@@ -503,28 +505,64 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	hash[TX * 4 + 3] = load[1];
 }
 
+
+// add & output carry flag
+#define UADDO(c, a, b) asm volatile("add.cc.u32 %0, %1, %2;" : "=r"(c) : "r"(a), "r"(b));
+// add with carry & output carry flag
+#define UADDC(c, a, b) asm volatile("addc.cc.u32 %0, %1, %2;" : "=r"(c) : "r"(a), "r"(b));
+
 __global__ void winternitzOTS(const uint64_t* hash, const uint64_t* pkey, uint64_t* sig_data, const uint32_t num_msgs)
 {
 	if (TX >= (num_msgs))
 		return;
 
-	register uint64_t private_key[2 * 6];
+	register uint32_t private_key[4 * 6];
 
 	for(int i = 0; i < 6; ++i)
 		reinterpret_cast<uint4*>(private_key)[i] = reinterpret_cast<const uint4*>(pkey)[TX * 6 + i];
 
-	register uint64_t y[2 * 6];
+	register uint32_t y[4 * 6];
 
 	for (int i = 0; i < 6; ++i)
 	{
-		y[2 * i] = private_key[2 * i] + UINT32_MAX;
-		y[2 * i + 1] = private_key[2 * i + 1] + (y[2 * i] < UINT32_MAX);
+		UADDO(y[4 * i], private_key[4 * i], UINT32_MAX)
+		UADDC(y[4 * i + 1], private_key[4 * i + 1], 0)
+		UADDC(y[4 * i + 2], private_key[4 * i + 2], 0)
+		UADDC(y[4 * i + 3], private_key[4 * i + 3], 0)
+	}
+
+	register uint32_t hash_reg[4];
+	reinterpret_cast<uint4*>(hash_reg)[0] = reinterpret_cast<const uint4*>(hash)[TX];
+
+	register uint32_t b[6];
+	register uint64_t c = 0;
+
+	for (int i = 2; i < 6; ++i)
+	{
+		b[i] = hash_reg[i - 2];
+		c += UINT32_MAX - (b[i] + 1);
+	}
+
+	for (int i = 0; i < 2; ++i)
+	{
+		b[i] = (c >> (i * 32));
+	}
+
+	uint32_t signature[4 * 6];
+
+	for (int i = 0; i < 6; ++i)
+	{
+		UADDO(signature[4 * i], private_key[4 * i], b[i])
+		UADDC(signature[4 * i + 1], private_key[4 * i + 1], 0)
+		UADDC(signature[4 * i + 2], private_key[4 * i + 2], 0)
+		UADDC(signature[4 * i + 3], private_key[4 * i + 3], 0)
 	}
 
 	for (int i = 0; i < 6; ++i)
-		reinterpret_cast<uint4*>(sig_data)[TX * 7 + i] = reinterpret_cast<uint4*>(y)[i];
+		reinterpret_cast<uint4*>(sig_data)[TX * 12 + i] = reinterpret_cast<uint4*>(signature)[i];
 
-	reinterpret_cast<uint4*>(sig_data)[TX * 7 + 6] = reinterpret_cast<const uint4*>(hash)[TX];
+	for (int i = 0; i < 6; ++i)
+		reinterpret_cast<uint4*>(sig_data)[TX * 12 + i + 6] = reinterpret_cast<const uint4*>(y)[i];
 }
 
 
@@ -542,39 +580,53 @@ inline void _checkCudaError(cudaError_t error, const char* file, const int line)
 
 
 
-cudaError_t harakaCuda(const vector<char>& msg, vector<char>& digest)
+cudaError_t harakaCuda512(const char* msgs, char* hashes, const uint32_t num_msgs)
 {
-	assert(!(msg.size() % 64));
-	assert(msg.size() == digest.size() * 2);
+	uint32_t msgs_per_stream = num_msgs / NUM_STREAMS;
+	uint32_t remaining_msgs = num_msgs - NUM_STREAMS * msgs_per_stream;
+
+	uint32_t grid_size = (num_msgs * MSG_SIZE_BYTE_512 + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+	dim3 block_dim(MAX_THREAD);
 
 	checkCudaError(cudaSetDevice(0));
 
 	char* msg_device;
-	checkCudaError(cudaMalloc((void**)&msg_device, msg.size() * sizeof(char)));
-	checkCudaError(cudaMemcpyAsync((void *)msg_device, &msg[0], msg.size(), cudaMemcpyHostToDevice, 0));
+	checkCudaError(cudaMalloc((void**)&msg_device, msgs_per_stream * MSG_SIZE_BYTE_512 * sizeof(char)));
 
-	char* digest_device;
-	checkCudaError(cudaMalloc((void**)&digest_device, digest.size() * sizeof(char)));
+	char* hash_device;
+	checkCudaError(cudaMalloc((void**)&hash_device, msgs_per_stream * HASH_SIZE_BYTE * sizeof(char)));
 
-	size_t gridSize = msg.size() / (MAX_THREAD*AES_BLOCK_SIZE * 4);
-	if (!(msg.size() % (MAX_THREAD*AES_BLOCK_SIZE * 4)) == 0)
-		gridSize = msg.size() / (MAX_THREAD*AES_BLOCK_SIZE * 4) + 1;
+	cudaStream_t streams[NUM_STREAMS];
 
-	dim3 dimBlock(MAX_THREAD);
+	for (int i = 0; i < NUM_STREAMS; ++i)
+	{
+		cudaStreamCreate(&streams[i]);
+		checkCudaError(cudaMemcpyAsync((void *)msg_device, &msgs[msgs_per_stream * MSG_SIZE_BYTE_512 * i], msgs_per_stream * MSG_SIZE_BYTE_512, cudaMemcpyHostToDevice, streams[i]));
 
-	//launch kernel
-	for (int i = 0; i < 20; ++i)
-		haraka512Kernel << <gridSize, dimBlock >> >((uint64_t *)msg_device, (uint64_t*)digest_device, msg.size() / 64);
+		//launch kernel
+		haraka512Kernel << <grid_size, block_dim, 0, streams[i] >> > ((uint64_t*)msg_device, (uint64_t*)hash_device, msgs_per_stream);
 
+		checkCudaError(cudaMemcpyAsync(&hashes[msgs_per_stream * HASH_SIZE_BYTE * i], hash_device, msgs_per_stream * HASH_SIZE_BYTE, cudaMemcpyDeviceToHost, streams[i]));
+	}
+
+	if (remaining_msgs > 0)
+	{
+		cudaStream_t rem_stream;
+		cudaStreamCreate(&rem_stream);
+		checkCudaError(cudaMemcpyAsync((void *)msg_device, &msgs[msgs_per_stream * NUM_STREAMS * MSG_SIZE_BYTE_512], remaining_msgs * MSG_SIZE_BYTE_512, cudaMemcpyHostToDevice, rem_stream));
+
+		//launch kernel
+		haraka512Kernel << <grid_size, block_dim, 0, rem_stream >> > ((uint64_t*)msg_device, (uint64_t*)hash_device, remaining_msgs);
+
+		checkCudaError(cudaMemcpyAsync(&hashes[msgs_per_stream * NUM_STREAMS * HASH_SIZE_BYTE], hash_device, remaining_msgs * HASH_SIZE_BYTE, cudaMemcpyDeviceToHost, rem_stream));
+	}
 	checkCudaError(cudaGetLastError());
-
-	checkCudaError(cudaMemcpyAsync(&digest[0], digest_device, digest.size(), cudaMemcpyDeviceToHost, 0));
 	checkCudaError(cudaDeviceSynchronize());
 
 	//copy result back
 
 	cudaFree(msg_device);
-	cudaFree(digest_device);
+	cudaFree(hash_device);
 
 	return cudaSuccess;
 }
@@ -583,12 +635,12 @@ cudaError_t harakaCuda(const vector<char>& msg, vector<char>& digest)
 
 int harakaWinternitzCuda(const char* msgs, char* signatures, const uint32_t num_msgs)
 {
-	HCRYPTPROV   hCryptProv;
+	HCRYPTPROV hCryptProv;
 	uint64_t* private_key = new uint64_t[2 * T * num_msgs];
-	uint64_t* sig_data = new uint64_t[2 * (T + 1) * num_msgs];
+	/*uint64_t* sig_data = new uint64_t[2 * (T + 2) * num_msgs];
 	uint64_t* sigma = new uint64_t[2 * T * num_msgs];
 	uint32_t* b = new uint32_t[T * num_msgs];
-	uint64_t* c = new uint64_t[num_msgs];
+	uint64_t* c = new uint64_t[num_msgs];*/
 
 	if (!CryptAcquireContext(&hCryptProv, NULL, NULL, PROV_RSA_FULL, 0))
 		return -1;
@@ -602,17 +654,18 @@ int harakaWinternitzCuda(const char* msgs, char* signatures, const uint32_t num_
 	char* hash_device;
 	char* sig_data_device;
 	char* private_key_device;
-	checkCudaError(cudaMalloc((void**)&msg_device, num_msgs * MSG_SIZE_BYTE * sizeof(char)));
-	checkCudaError(cudaMalloc((void**)&hash_device, num_msgs * HASH_SIZE_BYTE * sizeof(char)));
-	checkCudaError(cudaMalloc((void**)&sig_data_device, HASH_SIZE_BYTE * (T + 1) * num_msgs * sizeof(char)));
-	checkCudaError(cudaMalloc((void**)&private_key_device, HASH_SIZE_BYTE * T * num_msgs * sizeof(char)));
+	checkCudaError(cudaMalloc((void**)&msg_device, num_msgs * MSG_SIZE_BYTE_512 * sizeof(char) / NUM_STREAMS));
+	checkCudaError(cudaMalloc((void**)&hash_device, num_msgs * HASH_SIZE_BYTE * sizeof(char) / NUM_STREAMS));
+	checkCudaError(cudaMalloc((void**)&sig_data_device, HASH_SIZE_BYTE * (T + 1) * num_msgs * sizeof(char) / NUM_STREAMS));
+	checkCudaError(cudaMalloc((void**)&private_key_device, HASH_SIZE_BYTE * T * num_msgs * sizeof(char) / NUM_STREAMS));
 
-	size_t gridSize = (num_msgs * MSG_SIZE_BYTE + MAX_THREAD * AES_BLOCK_SIZE * 4 * NUM_STREAMS - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4 * NUM_STREAMS);
+
+	uint32_t gridSize = (num_msgs * MSG_SIZE_BYTE_512 + MAX_THREAD * AES_BLOCK_SIZE * 4 * NUM_STREAMS - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4 * NUM_STREAMS);
 	dim3 dimBlock(MAX_THREAD);
 
-	uint32_t size_msgs_block = MSG_SIZE_BYTE * num_msgs / NUM_STREAMS;
-	uint32_t size_pkey_block = HASH_SIZE_BYTE * T * num_msgs / NUM_STREAMS;
-	uint32_t size_sigd_block = HASH_SIZE_BYTE * (T + 1) * num_msgs / NUM_STREAMS;
+	uint32_t size_msgs_block = MSG_SIZE_BYTE_512 * num_msgs / NUM_STREAMS;
+	uint32_t size_pkey_block = HASH_SIZE_BYTE/2 * T * num_msgs / NUM_STREAMS;
+	uint32_t size_sigd_block = HASH_SIZE_BYTE * T * num_msgs / NUM_STREAMS;
 	uint32_t offset_msgs = 0;
 	uint32_t offset_pkey = 0;
 	uint32_t offset_sigd = 0;
@@ -620,20 +673,20 @@ int harakaWinternitzCuda(const char* msgs, char* signatures, const uint32_t num_
 	{
 		cudaStreamCreate(&streams_haraka[i]);
 		cudaStreamCreate(&streams_ots[i]);
-		checkCudaError(cudaMemcpyAsync((void *)(&msg_device[offset_msgs]), &msgs[offset_msgs], size_msgs_block, cudaMemcpyHostToDevice, streams_haraka[i]));
+		checkCudaError(cudaMemcpyAsync((void *)msg_device, &msgs[offset_msgs], size_msgs_block, cudaMemcpyHostToDevice, streams_haraka[i]));
 
-		if (!CryptGenRandom(hCryptProv, 2 * T * num_msgs / NUM_STREAMS, reinterpret_cast<BYTE*>(&private_key[2 * T * num_msgs / (8*NUM_STREAMS)])))
+		if (!CryptGenRandom(hCryptProv, size_pkey_block, (BYTE*)(&private_key[offset_pkey / 8])))
 			return -2;
 
-		checkCudaError(cudaMemcpyAsync((void *)(&private_key_device[offset_pkey]), &private_key[offset_pkey], size_pkey_block, cudaMemcpyHostToDevice, streams_ots[i]));
+		checkCudaError(cudaMemcpyAsync((void *)private_key_device, &private_key[offset_pkey / 8], size_pkey_block, cudaMemcpyHostToDevice, streams_ots[i]));
 
 		//launch kernel
-		haraka512Kernel << <gridSize, dimBlock, 0, streams_haraka[i]>> > ((uint64_t *)(&msg_device[offset_msgs]), (uint64_t*)(&hash_device[offset_msgs/2]), num_msgs/NUM_STREAMS);
+		haraka512Kernel << <gridSize, dimBlock, 0, streams_haraka[i]>> > ((uint64_t *)(msg_device), (uint64_t*)(hash_device), num_msgs/NUM_STREAMS);
 
-		winternitzOTS << <gridSize, dimBlock, 0, streams_ots[i] >> > ((uint64_t *)(&hash_device[offset_msgs/2]), (uint64_t *)(&private_key_device[offset_pkey]), (uint64_t *)(&sig_data_device[offset_sigd]), num_msgs / NUM_STREAMS);
+		winternitzOTS << <gridSize, dimBlock, 0, streams_ots[i] >> > ((uint64_t *)(hash_device), (uint64_t *)(private_key_device), (uint64_t *)(sig_data_device), num_msgs / NUM_STREAMS);
 
 		//copy result back
-		checkCudaError(cudaMemcpyAsync(&sig_data[offset_sigd], &sig_data_device[offset_sigd], size_sigd_block, cudaMemcpyDeviceToHost, streams_ots[i]));
+		checkCudaError(cudaMemcpyAsync(&signatures[offset_sigd], sig_data_device, size_sigd_block, cudaMemcpyDeviceToHost, streams_ots[i]));
 
 		offset_msgs += size_msgs_block;
 		offset_pkey += size_pkey_block;
@@ -642,50 +695,43 @@ int harakaWinternitzCuda(const char* msgs, char* signatures, const uint32_t num_
 	checkCudaError(cudaGetLastError());
 
 	checkCudaError(cudaDeviceSynchronize());
-
+	
 	cudaFree(msg_device);
 	cudaFree(hash_device);
 	cudaFree(sig_data_device);
 	cudaFree(private_key_device);
 
-	//OTS---------------------------------------------------------------------------------------
 
+	//uint64_t* y = new uint64_t[2 * T * num_msgs];
+	//uint64_t* d = new uint64_t[2 * num_msgs];
 
-
-
-
-	/*for (int i = 0; i < T; ++i)
+	/*for (int i = 0; i < num_msgs; ++i)
 	{
-		y[2 * i] = private_key[2 * i] + UINT32_MAX;
-		y[2 * i + 1] = private_key[2 * i + 1] + (y[2 * i] < UINT32_MAX);
+		sigma[i * 12 + 0] = sig_data[i * 16 + 0];
+		sigma[i * 12 + 1] = sig_data[i * 16 + 1];
+		sigma[i * 12 + 2] = sig_data[i * 16 + 2];
+		sigma[i * 12 + 3] = sig_data[i * 16 + 3];
+		sigma[i * 12 + 4] = sig_data[i * 16 + 4];
+		sigma[i * 12 + 5] = sig_data[i * 16 + 5];
+		sigma[i * 12 + 6] = sig_data[i * 16 + 6];
+		sigma[i * 12 + 7] = sig_data[i * 16 + 7];
+		sigma[i * 12 + 8] = sig_data[i * 16 + 8];
+		sigma[i * 12 + 9] = sig_data[i * 16 + 9];
+		sigma[i * 12 + 10] = sig_data[i * 16 + 10];
+		sigma[i * 12 + 11] = sig_data[i * 16 + 11];
+		b[i * 6] = reinterpret_cast<uint32_t*>(&sig_data[i * 16 + 12])[0];
+		b[i * 6 + 1] = reinterpret_cast<uint32_t*>(&sig_data[i * 16 + 12])[1];
+		b[i * 6 + 2] = reinterpret_cast<uint32_t*>(&sig_data[i * 16 + 13])[0];
+		b[i * 6 + 3] = reinterpret_cast<uint32_t*>(&sig_data[i * 16 + 13])[1];
+		b[i * 6 + 4] = reinterpret_cast<uint32_t*>(&sig_data[i * 16 + 14])[0];
+		b[i * 6 + 5] = reinterpret_cast<uint32_t*>(&sig_data[i * 16 + 14])[1];
 	}*/
-	//OTS---------------------------------------------------------------------------------------
-	uint64_t* y = new uint64_t[2 * T * num_msgs];
-	uint64_t* d = new uint64_t[2 * num_msgs];
 
-	for (int i = 0; i < num_msgs; ++i)
-	{
-		y[i + 0] = sig_data[i + 0];
-		y[i + 1] = sig_data[i + 1];
-		y[i + 2] = sig_data[i + 2];
-		y[i + 3] = sig_data[i + 3];
-		y[i + 4] = sig_data[i + 4];
-		y[i + 5] = sig_data[i + 5];
-		y[i + 6] = sig_data[i + 6];
-		y[i + 7] = sig_data[i + 7];
-		y[i + 8] = sig_data[i + 8];
-		y[i + 9] = sig_data[i + 9];
-		y[i + 10] = sig_data[i + 10];
-		y[i + 11] = sig_data[i + 11];
-		d[i + 12] = sig_data[i + 12];
-		d[i + 13] = sig_data[i + 13];
-	}
-
-	for (int i = T - T1; i < T; ++i)
+	/*for (int i = T - T1; i < T; ++i)
 	{
 		for (int j = 0; j < num_msgs; ++j)
 		{
-			b[i + j * T] = reinterpret_cast<uint32_t*>(&signatures[0])[i - T + T1 + T1 * j];
+			b[i + j * T] = reinterpret_cast<uint32_t*>(&d[0])[i - T + T1 + T1 * j];
 			c[j] += UINT32_MAX - (b[i + j * T] + 1);
 		}
 	}
@@ -694,34 +740,43 @@ int harakaWinternitzCuda(const char* msgs, char* signatures, const uint32_t num_
 	{
 		for(int j = 0; j < num_msgs; ++j)
 			b[i + j * T] = (c[j] >> (i * 32));
-	}
+	}*/
+
+	/*for (int i = 0; i < T * num_msgs; ++i)
+	{
+		y[2 * i] = private_key[2 * i] + UINT32_MAX;
+		y[2 * i + 1] = private_key[2 * i + 1] + (y[2 * i] < UINT32_MAX);
+	}*/
 
 
-	for (int i = 0; i < T * num_msgs; ++i)
+	/*for (int i = 0; i < T * num_msgs; ++i)
 	{
 		sigma[2 * i] = private_key[2 * i] + b[i];
 		sigma[2 * i + 1] = private_key[2 * i + 1] + (sigma[2 * i] < b[i]);
-	}
+	}*/
 
 
 
-	vector<uint64_t> v(2 * T * num_msgs);
+	/*vector<uint64_t> v(2 * T * num_msgs);
 	for (int i = 0; i < T * num_msgs; ++i)
 	{
 		v[2 * i] = sigma[2 * i] + UINT32_MAX - b[i];
 		v[2 * i + 1] = sigma[2 * i + 1] + (v[2 * i] < (UINT32_MAX - b[i]));
 	}
 
-	assert(memcmp(v, y, t * num_msgs * 8 * 2) == 0);
+	for(int i = 0; i < 12*2; ++i)
+		cout << y[i] << " | " << v[i] << " | " << memcmp((void*)&v[i], (void*)&y[i], 8) << endl;
+
+	cout << memcmp((void*)&v[0], (void*)&y[0], T * num_msgs * 8 * 2) << endl;*/
 
 	delete private_key;
-	delete sig_data;
+	/*delete sig_data;
 	delete sigma;
 	delete c;
-	delete b;
+	delete b;*/
 
-	delete y;
-	delete d;
+	//delete y;
+	//delete d;
 
 	return 0;
 }

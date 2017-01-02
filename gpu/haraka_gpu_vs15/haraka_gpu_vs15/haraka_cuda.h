@@ -17,17 +17,18 @@ const uint32_t NUM_STREAMS = 16;
 const uint32_t AES_BLOCK_SIZE = 16;
 const uint32_t STATE_THREAD_AES = 4;
 const uint32_t HASH_SIZE_BYTE = 32;
-const uint32_t MSG_SIZE_BYTE = 64;
+const uint32_t MSG_SIZE_BYTE_256 = 32;
+const uint32_t MSG_SIZE_BYTE_512 = 64;
 
 //Winternitz OTS defines
 const uint32_t NUM_DIGEST_BITS = 128;
 const uint32_t WINTERNITZ_PARAM = 32;
 const uint32_t T1 = (NUM_DIGEST_BITS + WINTERNITZ_PARAM - 1) / WINTERNITZ_PARAM;
-const uint32_t T2 = (int(log2f(T1)) + WINTERNITZ_PARAM + WINTERNITZ_PARAM) / WINTERNITZ_PARAM;
+const uint32_t T2 = (int(log2f(float(T1))) + WINTERNITZ_PARAM + WINTERNITZ_PARAM) / WINTERNITZ_PARAM;
 const uint32_t T = T1 + T2;
 
 //functions
-cudaError_t harakaCuda(const vector<char>& msg, vector<char>& digest);
+cudaError_t harakaCuda512(const char* msgs, char* hashes, const uint32_t num_msgs);
 
 int harakaWinternitzCuda(const char* msgs, char* signatures, const uint32_t num_msgs);
 

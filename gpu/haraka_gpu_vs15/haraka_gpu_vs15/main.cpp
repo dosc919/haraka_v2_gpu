@@ -15,10 +15,9 @@ using namespace std;
 const uint32_t NUM_MESSAGES = 4194304;
 const uint32_t NUM_MEASURMENTS = 10;
 
-//#define TEST_PERFORMANCE
-//#define TEST_FUNCTIONALITY_RANDOM
-//#define TEST_FUNCTIONALITY
-#define TEST_OTS
+#define TEST_PERFORMANCE_512
+//#define TEST_FUNCTIONALITY_512
+//#define TEST_OTS
 
 
 int cmp_f(const void *x, const void *y)
@@ -46,16 +45,16 @@ void testOTS()
 
 	auto gen = bind(dist, mersenne_engine);
 
-	vector<char> digest_ref(DIGEST_SIZE_BYTE * NUM_MESSAGES);
+	vector<char> digest_ref(HASH_SIZE_BYTE * NUM_MESSAGES);
 
 	for (int j = 0; j < NUM_MEASURMENTS; ++j)
 	{
 		char* input;
-		cudaMallocHost((void**)&input, INPUT_SIZE_BYTE * NUM_MESSAGES);
-		generate(input, input + INPUT_SIZE_BYTE * NUM_MESSAGES - 1, gen);
+		cudaMallocHost((void**)&input, MSG_SIZE_BYTE_512 * NUM_MESSAGES);
+		generate(input, input + MSG_SIZE_BYTE_512 * NUM_MESSAGES - 1, gen);
 
 		char* digest;
-		cudaMallocHost((void**)&digest, INPUT_SIZE_BYTE * NUM_MESSAGES);
+		cudaMallocHost((void**)&digest, HASH_SIZE_BYTE * T * NUM_MESSAGES);
 
 		QueryPerformanceCounter((LARGE_INTEGER *)&t_begin);
 
@@ -64,10 +63,79 @@ void testOTS()
 		QueryPerformanceCounter((LARGE_INTEGER *)&t_end);
 		QueryPerformanceFrequency((LARGE_INTEGER *)&freq);
 
+		for (int i = 0; i < NUM_MESSAGES; ++i)
+			haraka512256(&digest_ref[HASH_SIZE_BYTE * i], &input[MSG_SIZE_BYTE_512 * i]);
+
+		//---------------------------------------------------------------------------------
+		uint32_t* b = new uint32_t[T * NUM_MESSAGES];
+		uint64_t* c = new uint64_t[NUM_MESSAGES];
+		for (int i = 2; i < T; ++i)
+		{
+			for (int j = 0; j < NUM_MESSAGES; ++j)
+			{
+				b[i + j * T] = reinterpret_cast<uint32_t*>(&digest_ref[0])[i - 2 + T1 * j];
+				c[j] += UINT32_MAX - (b[i + j * T] + 1);
+			}
+		}
+
+		for (int i = 2; i < 6; ++i)
+		{
+			b[i] = reinterpret_cast<uint32_t*>(&digest_ref[0])[i - 2];
+			c[0] += UINT32_MAX - (b[i] + 1);
+		}
+
+		for (int i = 0; i < T2; ++i)
+		{
+			for(int j = 0; j < NUM_MESSAGES; ++j)
+			b[i + j * T] = (c[j] >> (i * 32));
+		}
+
+		vector<uint64_t> v(2 * T * NUM_MESSAGES);
+		vector<uint64_t> y(2 * 6 * NUM_MESSAGES);
+		for (int i = 0; i < NUM_MESSAGES; ++i)
+		{
+			v[12 * i] = reinterpret_cast<uint64_t*>(digest)[24 * i] +(UINT32_MAX - b[0]);
+			v[12 * i + 1] = reinterpret_cast<uint64_t*>(digest)[24 * i + 1] + (v[12 * i] < (UINT32_MAX - b[0]));
+			v[12 * i + 2] = reinterpret_cast<uint64_t*>(digest)[24 * i + 2] + UINT32_MAX - b[1];
+			v[12 * i + 3] = reinterpret_cast<uint64_t*>(digest)[24 * i + 3] + (v[12 * i + 2] < (UINT32_MAX - b[1]));
+			v[12 * i + 4] = reinterpret_cast<uint64_t*>(digest)[24 * i + 4] + UINT32_MAX - b[2];
+			v[12 * i + 5] = reinterpret_cast<uint64_t*>(digest)[24 * i + 5] + (v[12 * i + 4] < (UINT32_MAX - b[2]));
+			v[12 * i + 6] = reinterpret_cast<uint64_t*>(digest)[24 * i + 6] + UINT32_MAX - b[3];
+			v[12 * i + 7] = reinterpret_cast<uint64_t*>(digest)[24 * i + 7] + (v[12 * i + 6] < (UINT32_MAX - b[3]));
+			v[12 * i + 8] = reinterpret_cast<uint64_t*>(digest)[24 * i + 8] + UINT32_MAX - b[4];
+			v[12 * i + 9] = reinterpret_cast<uint64_t*>(digest)[24 * i + 9] + (v[12 * i + 8] < (UINT32_MAX - b[4]));
+			v[12 * i + 10] = reinterpret_cast<uint64_t*>(digest)[24 * i + 10] + UINT32_MAX - b[5];
+			v[12 * i + 11] = reinterpret_cast<uint64_t*>(digest)[24 * i + 11] + (v[12 * i + 10] < (UINT32_MAX - b[5]));
+
+
+			y[12 * i] = reinterpret_cast<uint64_t*>(digest)[24 * i + 12];
+			y[12 * i + 1] = reinterpret_cast<uint64_t*>(digest)[24 * i + 13];
+			y[12 * i + 2] = reinterpret_cast<uint64_t*>(digest)[24 * i + 14];
+			y[12 * i + 3] = reinterpret_cast<uint64_t*>(digest)[24 * i + 15];
+			y[12 * i + 4] = reinterpret_cast<uint64_t*>(digest)[24 * i + 16];
+			y[12 * i + 5] = reinterpret_cast<uint64_t*>(digest)[24 * i + 17];
+			y[12 * i + 6] = reinterpret_cast<uint64_t*>(digest)[24 * i + 18];
+			y[12 * i + 7] = reinterpret_cast<uint64_t*>(digest)[24 * i + 19];
+			y[12 * i + 8] = reinterpret_cast<uint64_t*>(digest)[24 * i + 20];
+			y[12 * i + 9] = reinterpret_cast<uint64_t*>(digest)[24 * i + 21];
+			y[12 * i + 10] = reinterpret_cast<uint64_t*>(digest)[24 * i + 22];
+			y[12 * i + 11] = reinterpret_cast<uint64_t*>(digest)[24 * i + 23];
+		}
+
+		delete b;
+		delete c;
+		//---------------------------------------------------------------------------------
+		for (int i = 0; i < 12 * 2; ++i)
+			cout << y[i] << " | " << v[i] << " | " << memcmp((void*)&v[i], (void*)&y[i], 8) << endl;
+		cout << memcmp((void*)&v[0], (void*)&y[0], T * NUM_MESSAGES * 8 * 2) << endl;
+
+
 		times[j] = ((t_end - t_begin) * 1000.0 / freq);
 
 		if(j > 1)
 			sum += times[j];
+
+		cout << times[j] << endl;
 
 		cudaFreeHost(input);
 		cudaFreeHost(digest);
@@ -80,36 +148,14 @@ void testOTS()
 	while (1);
 }
 
-int testPerformance()
+void testPerformance512()
 {
-	// First create an instance of an engine.
-	random_device rnd_device;
-	// Specify the engine and distribution.
-	mt19937 mersenne_engine(rnd_device());
-	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
+	float sum = 0;
+	float times[NUM_MEASURMENTS];
 
-	auto gen = bind(dist, mersenne_engine);
-	vector<char> input(INPUT_SIZE_BYTE * NUM_MESSAGES);
-	generate(begin(input), end(input), gen);
-
-	vector<char> digest(DIGEST_SIZE_BYTE * NUM_MESSAGES);
-	cudaError_t cuda_status = harakaCuda(input, digest);
-
-	//for (int i = 0; i < NUM_MESSAGES; ++i)
-	//{
-	//	printVector(INPUT_TEXT, vector<char>(&input[i * 64], &input[i * 64 + 63] + 1));
-	//	printVector(OUTPUT_TEXT, vector<char>(&digest[i * 32], &digest[i * 32 + 31] + 1));
-	//}
-
-	return cuda_status;
-}
-
-const vector<string> testFunctionalityRandom()
-{
-	vector<string> errors;
-	vector<char> input(INPUT_SIZE_BYTE * NUM_MESSAGES);
-	vector<char> digest(DIGEST_SIZE_BYTE * NUM_MESSAGES);
-	vector<char> digest_ref(DIGEST_SIZE_BYTE * NUM_MESSAGES);
+	uint64_t t_begin;
+	uint64_t t_end;
+	uint64_t freq;
 
 	// First create an instance of an engine.
 	random_device rnd_device;
@@ -118,109 +164,88 @@ const vector<string> testFunctionalityRandom()
 	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
 
 	auto gen = bind(dist, mersenne_engine);
-	generate(begin(input), end(input), gen);
 
-	cudaError_t cuda_status = harakaCuda(input, digest);
-
-	if (cuda_status != cudaSuccess)
-		errors.push_back(ERROR_CUDA);
-
-	for (int i = 0; i < NUM_MESSAGES; ++i)
-		haraka512256(&digest_ref[DIGEST_SIZE_BYTE * i], &input[INPUT_SIZE_BYTE * i]);
-
-	if (memcmp(&digest[0], &digest_ref[0], DIGEST_SIZE_BYTE * NUM_MESSAGES))
-		errors.push_back(ERROR_DIGEST_MISSMATCH);
-	
-	return errors;
-}
-
-const vector<string> testFunctionality()
-{
-	vector<string> errors;
-	ifstream file;
-	for (auto file_name : TEST_FILES)
+	for (int j = 0; j < NUM_MEASURMENTS; ++j)
 	{
-		file.open(file_name, ios::in | ios::binary);
-		if (!file.good())
-		{
-			errors.push_back(file_name + ERROR_FILE_OPEN);
-			continue;
-		}
+		char* input;
+		cudaMallocHost((void**)&input, MSG_SIZE_BYTE_512 * NUM_MESSAGES);
 
-		vector<char> input(INPUT_SIZE_BYTE);
-		file.read(&input[0], INPUT_SIZE_BYTE);
-		if (!file.good())
-		{
-			file.close();
-			errors.push_back(file_name + ERROR_FILE_READ_INPUT);
-			continue;
-		}
+		char* hash;
+		cudaMallocHost((void**)&hash, HASH_SIZE_BYTE * NUM_MESSAGES);
 
-		vector<char> digest_ref(DIGEST_SIZE_BYTE);
-		file.read(&digest_ref[0], DIGEST_SIZE_BYTE);
-		if (!file.good())
-		{
-			file.close();
-			errors.push_back(file_name + ERROR_FILE_READ_DIGEST);
-			continue;
-		}
+		generate(input, input + MSG_SIZE_BYTE_512 * NUM_MESSAGES - 1, gen);
 
-		printVector(INPUT_TEXT, input);
+		QueryPerformanceCounter((LARGE_INTEGER *)&t_begin);
 
-		vector<char> digest(DIGEST_SIZE_BYTE);
-		cudaError_t cuda_status = harakaCuda(input, digest);
+		harakaCuda512(input, hash, NUM_MESSAGES);
 
-		printVector(OUTPUT_TEXT, digest);
-		printVector(OUTPUT_REFERENCE_TEXT, digest_ref);
+		QueryPerformanceCounter((LARGE_INTEGER *)&t_end);
+		QueryPerformanceFrequency((LARGE_INTEGER *)&freq);
 
-		if (cuda_status != cudaSuccess)
-			errors.push_back(file_name + ERROR_CUDA);
+		times[j] = ((t_end - t_begin) * 1000.0 / freq);
 
-		if (memcmp(&digest[0], &digest_ref[0], DIGEST_SIZE_BYTE))
-			errors.push_back(file_name + ERROR_DIGEST_MISSMATCH);
+		if (j > 1)
+			sum += times[j];
 
-		file.close();
+		cout << times[j] << endl;
+
+		cudaFreeHost(input);
+		cudaFreeHost(hash);
 	}
 
-	return errors;
+	qsort(times, NUM_MEASURMENTS, sizeof(float), cmp_f);
+	cout << "median: " << times[NUM_MEASURMENTS / 2] << " ms\n   mid: " << sum / (NUM_MEASURMENTS - 2) << " ms" << endl;
+}
+
+const int testFunctionality512()
+{
+	char* input = new char[MSG_SIZE_BYTE_512 * NUM_MESSAGES];
+	char* hash = new char[HASH_SIZE_BYTE * NUM_MESSAGES];
+	char* hash_ref = new char[HASH_SIZE_BYTE * NUM_MESSAGES];
+
+	// First create an instance of an engine.
+	random_device rnd_device;
+	// Specify the engine and distribution.
+	mt19937 mersenne_engine(rnd_device());
+	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
+
+	auto gen = bind(dist, mersenne_engine);
+	generate(input, input + MSG_SIZE_BYTE_512 * NUM_MESSAGES - 1, gen);
+
+	cudaError_t cuda_status = harakaCuda512(input, hash, NUM_MESSAGES);
+
+	if (cuda_status != cudaSuccess)
+		return ERROR_CUDA;
+
+	for (int i = 0; i < NUM_MESSAGES; ++i)
+		haraka512256(&hash_ref[HASH_SIZE_BYTE * i], &input[MSG_SIZE_BYTE_512 * i]);
+	
+	int status = memcmp(hash, hash_ref, HASH_SIZE_BYTE * NUM_MESSAGES) == 0;
+
+	delete input;
+	delete hash;
+	delete hash_ref;
+
+	return status;
 }
 
 int main()
 {
 
-#ifdef TEST_PERFORMANCE
-	testPerformance();
+#ifdef TEST_PERFORMANCE_512
+	testPerformance512();
 #endif
 
-	vector<string> error_msgs;
-#ifdef TEST_FUNCTIONALITY
-	error_msgs = testFunctionality();
+	int status;
+#ifdef TEST_FUNCTIONALITY_512
+	status = testFunctionality512();
 
-	if (error_msgs.empty())
-	{
-		cout << "All " << TEST_FILES.size() << " tests succeeded." << endl;
-	}
+	if (status == TEST_SUCCESS)
+		cout << TEST_SUCCESS_STRING << endl;
+	else if (status == ERROR_HASH)
+		cout << ERROR_HASH_MISSMATCH << endl;
 	else
-	{
-		cout << endl << error_msgs.size() << " out of " << TEST_FILES.size() << " tests failed." << endl;
-		for (auto msg : error_msgs)
-			cout << msg << endl;
-	}
-#endif
-
-#ifdef TEST_FUNCTIONALITY_RANDOM
-	error_msgs = testFunctionalityRandom();
-
-	if (error_msgs.empty())
-	{
-		cout << "All " << TEST_FILES.size() << " tests succeeded." << endl;
-	}
-	else
-	{
-		cout << endl << error_msgs.size() << " out of " << TEST_FILES.size() << " tests failed." << endl;
-		for (auto msg : error_msgs)
-			cout << msg << endl;
-	}
+		cout << ERROR_CUDA_STRING << endl;
 #endif
 
 #ifdef TEST_OTS
@@ -236,12 +261,8 @@ int main()
 		return 1;
 	}
 
-#ifdef TEST_FUNCTIONALITY
+
 	while (1) {}
-#endif
-#ifdef TEST_FUNCTIONALITY_RANDOM
-	while (1) {}
-#endif
 
 	return 0;
 }
