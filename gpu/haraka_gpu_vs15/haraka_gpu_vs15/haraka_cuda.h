@@ -30,6 +30,8 @@ const uint32_t T = T1 + T2;
 //functions
 cudaError_t harakaCuda512(const char* msgs, char* hashes, const uint32_t num_msgs);
 
+cudaError_t harakaCuda256(const char* msgs, char* hashes, const uint32_t num_msgs);
+
 int harakaWinternitzCuda(const char* msgs, char* signatures, const uint32_t num_msgs);
 
 #endif

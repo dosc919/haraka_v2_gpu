@@ -11,8 +11,10 @@
 
 using namespace std;
 
-void printVector(const string& message, const vector<char>& vec_to_print);
+void printVector(const string& message, const char* vec_to_print, uint32_t size);
 
 int haraka512256(char *hash, const char *msg);
+
+int haraka256256(char *hash, const char *msg);
 
 #endif

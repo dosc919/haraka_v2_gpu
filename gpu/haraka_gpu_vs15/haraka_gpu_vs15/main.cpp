@@ -15,8 +15,10 @@ using namespace std;
 const uint32_t NUM_MESSAGES = 4194304;
 const uint32_t NUM_MEASURMENTS = 10;
 
-#define TEST_PERFORMANCE_512
+//#define TEST_PERFORMANCE_512
 //#define TEST_FUNCTIONALITY_512
+//#define TEST_PERFORMANCE_265
+#define TEST_FUNCTIONALITY_256
 //#define TEST_OTS
 
 
@@ -229,6 +231,39 @@ const int testFunctionality512()
 	return status;
 }
 
+const int testFunctionality256()
+{
+	char* input = new char[MSG_SIZE_BYTE_256 * NUM_MESSAGES];
+	char* hash = new char[HASH_SIZE_BYTE * NUM_MESSAGES];
+	char* hash_ref = new char[HASH_SIZE_BYTE * NUM_MESSAGES];
+
+	// First create an instance of an engine.
+	random_device rnd_device;
+	// Specify the engine and distribution.
+	mt19937 mersenne_engine(rnd_device());
+	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
+
+	auto gen = bind(dist, mersenne_engine);
+	generate(input, input + MSG_SIZE_BYTE_256 * NUM_MESSAGES - 1, gen);
+	
+
+	cudaError_t cuda_status = harakaCuda256(input, hash, NUM_MESSAGES);
+
+	if (cuda_status != cudaSuccess)
+		return ERROR_CUDA;
+
+	for (int i = 0; i < NUM_MESSAGES; ++i)
+		haraka256256(&hash_ref[HASH_SIZE_BYTE * i], &input[MSG_SIZE_BYTE_256 * i]);
+
+	int status = memcmp(hash, hash_ref, HASH_SIZE_BYTE * NUM_MESSAGES) == 0;
+
+	delete input;
+	delete hash;
+	delete hash_ref;
+
+	return status;
+}
+
 int main()
 {
 
@@ -239,6 +274,16 @@ int main()
 	int status;
 #ifdef TEST_FUNCTIONALITY_512
 	status = testFunctionality512();
+
+	if (status == TEST_SUCCESS)
+		cout << TEST_SUCCESS_STRING << endl;
+	else if (status == ERROR_HASH)
+		cout << ERROR_HASH_MISSMATCH << endl;
+	else
+		cout << ERROR_CUDA_STRING << endl;
+#endif
+#ifdef TEST_FUNCTIONALITY_256
+	status = testFunctionality256();
 
 	if (status == TEST_SUCCESS)
 		cout << TEST_SUCCESS_STRING << endl;

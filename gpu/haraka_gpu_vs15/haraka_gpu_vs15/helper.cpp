@@ -3,20 +3,17 @@
 
 #include <iomanip>
 
-void printVector(const string& message, const vector<char>& vec_to_print)
+void printVector(const string& message, const char* vec_to_print, uint32_t size)
 {
 	cout << endl;
 	if (!message.empty())
 		cout << message << endl;
 
-	if (vec_to_print.empty())
-		return;
-
-	cout << "Size of Vector: " << vec_to_print.size() << " byte" << endl;
+	cout << "Size of Vector: " << size << " byte" << endl;
 
 	for (unsigned int i = 0; i < 4; ++i)
 	{
-		for (unsigned int j = i; j < vec_to_print.size(); j += 4)
+		for (unsigned int j = i; j < size; j += 4)
 		{
 			printf("%02x ", (unsigned char)vec_to_print[j]);
 
@@ -114,5 +111,60 @@ int haraka512256(char *hash, const char *msg)
 	_mm_maskmoveu_si128(s[1], MSB64, (hash + 0));
 	_mm_storel_epi64((__m128i*)(hash + 16), s[2]);
 	_mm_storel_epi64((__m128i*)(hash + 24), s[3]);
+	return 0;
+}
+
+int haraka256256(char *hash, const char *msg) {
+	// stuff we need
+	int i, j;
+	__m128i s[2], tmp, rcon, rc[20];
+	__m128i MSB64 = _mm_set_epi32(0xFFFFFFFF, 0xFFFFFFFF, 0, 0);
+
+	// define round constants
+	rc[0] = _mm_set_epi32(0x0684704c, 0xe620c00a, 0xb2c5fef0, 0x75817b9d);
+	rc[1] = _mm_set_epi32(0x8b66b4e1, 0x88f3a06b, 0x640f6ba4, 0x2f08f717);
+	rc[2] = _mm_set_epi32(0x3402de2d, 0x53f28498, 0xcf029d60, 0x9f029114);
+	rc[3] = _mm_set_epi32(0x0ed6eae6, 0x2e7b4f08, 0xbbf3bcaf, 0xfd5b4f79);
+	rc[4] = _mm_set_epi32(0xcbcfb0cb, 0x4872448b, 0x79eecd1c, 0xbe397044);
+	rc[5] = _mm_set_epi32(0x7eeacdee, 0x6e9032b7, 0x8d5335ed, 0x2b8a057b);
+	rc[6] = _mm_set_epi32(0x67c28f43, 0x5e2e7cd0, 0xe2412761, 0xda4fef1b);
+	rc[7] = _mm_set_epi32(0x2924d9b0, 0xafcacc07, 0x675ffde2, 0x1fc70b3b);
+	rc[8] = _mm_set_epi32(0xab4d63f1, 0xe6867fe9, 0xecdb8fca, 0xb9d465ee);
+	rc[9] = _mm_set_epi32(0x1c30bf84, 0xd4b7cd64, 0x5b2a404f, 0xad037e33);
+	rc[10] = _mm_set_epi32(0xb2cc0bb9, 0x941723bf, 0x69028b2e, 0x8df69800);
+	rc[11] = _mm_set_epi32(0xfa0478a6, 0xde6f5572, 0x4aaa9ec8, 0x5c9d2d8a);
+	rc[12] = _mm_set_epi32(0xdfb49f2b, 0x6b772a12, 0x0efa4f2e, 0x29129fd4);
+	rc[13] = _mm_set_epi32(0x1ea10344, 0xf449a236, 0x32d611ae, 0xbb6a12ee);
+	rc[14] = _mm_set_epi32(0xaf044988, 0x4b050084, 0x5f9600c9, 0x9ca8eca6);
+	rc[15] = _mm_set_epi32(0x21025ed8, 0x9d199c4f, 0x78a2c7e3, 0x27e593ec);
+	rc[16] = _mm_set_epi32(0xbf3aaaf8, 0xa759c9b7, 0xb9282ecd, 0x82d40173);
+	rc[17] = _mm_set_epi32(0x6260700d, 0x6186b017, 0x37f2efd9, 0x10307d6b);
+	rc[18] = _mm_set_epi32(0x5aca45c2, 0x21300443, 0x81c29153, 0xf6fc9ac6);
+	rc[19] = _mm_set_epi32(0x9223973c, 0x226b68bb, 0x2caf92e8, 0x36d1943a);
+
+	// initialize state to msg
+	s[0] = _mm_load_si128(&((__m128i*)msg)[0]);
+	s[1] = _mm_load_si128(&((__m128i*)msg)[1]);
+
+	for (i = 0; i < ROUNDS; ++i) {
+		// aes round(s)
+		for (j = 0; j < AES_PER_ROUND; ++j) {
+			s[0] = _mm_aesenc_si128(s[0], rc[2 * AES_PER_ROUND*i + 2 * j]);
+			s[1] = _mm_aesenc_si128(s[1], rc[2 * AES_PER_ROUND*i + 2 * j + 1]);
+		}
+
+		// mixing
+		tmp = _mm_unpacklo_epi32(s[0], s[1]);
+		s[1] = _mm_unpackhi_epi32(s[0], s[1]);
+		s[0] = tmp;
+	}
+
+	// xor message to get DM effect
+	s[0] = _mm_xor_si128(s[0], _mm_load_si128(&((__m128i*)msg)[0]));
+	s[1] = _mm_xor_si128(s[1], _mm_load_si128(&((__m128i*)msg)[1]));
+
+	// store result
+	_mm_storeu_si128((__m128i*)hash, s[0]);
+	_mm_storeu_si128((__m128i*)(hash + 16), s[1]);
 	return 0;
 }

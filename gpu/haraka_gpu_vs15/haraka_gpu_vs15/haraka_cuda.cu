@@ -354,7 +354,7 @@ __constant__ const uint32_t RC[256] = {\
 		__syncthreads();
 
 
-#define GLOBAL_LOAD_SHARED_SETUP \
+#define GLOBAL_LOAD_SHARED_SETUP_512 \
 		register uint32_t r0, r1, r2, r3; \
 		register uint32_t s0, s1, s2, s3; \
 		register uint32_t t0, t1, t2, t3; \
@@ -383,7 +383,7 @@ __constant__ const uint32_t RC[256] = {\
 		v3 = load[1] >> 32;
 
 
-#define MIX \
+#define MIX_512 \
 	r0 = s0; \
 	r1 = s1; \
 	r2 = s2; \
@@ -418,7 +418,7 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	if (TX >= (num_msgs))
 		return;
 
-	GLOBAL_LOAD_SHARED_SETUP
+	GLOBAL_LOAD_SHARED_SETUP_512
 
 	AES_ENC_ROUND(0, r, s);
 	AES_ENC_ROUND(16, s, r);
@@ -432,7 +432,7 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	AES_ENC_ROUND(3 * 4, r, v);
 	AES_ENC_ROUND(3 * 4 + 16, v, r);
 
-	MIX
+	MIX_512
 
 	AES_ENC_ROUND(0 * 4 + 32, r, s);
 	AES_ENC_ROUND(0 * 4 + 48, s, r);
@@ -446,7 +446,7 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	AES_ENC_ROUND(3 * 4 + 32, r, v);
 	AES_ENC_ROUND(3 * 4 + 48, v, r);
 
-	MIX
+	MIX_512
 
 	AES_ENC_ROUND(0 * 4 + 64, r, s);
 	AES_ENC_ROUND(0 * 4 + 80, s, r);
@@ -460,7 +460,7 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	AES_ENC_ROUND(3 * 4 + 64, r, v);
 	AES_ENC_ROUND(3 * 4 + 80, v, r);
 
-	MIX
+	MIX_512
 
 	AES_ENC_ROUND(0 * 4 + 96, r, s);
 	AES_ENC_ROUND(0 * 4 + 112, s, r);
@@ -474,7 +474,7 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	AES_ENC_ROUND(3 * 4 + 96, r, v);
 	AES_ENC_ROUND(3 * 4 + 112, v, r);
 
-	MIX
+	MIX_512
 
 	AES_ENC_ROUND(0 * 4 + 128, r, s);
 	AES_ENC_ROUND(0 * 4 + 144, s, r);
@@ -488,7 +488,7 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	AES_ENC_ROUND(3 * 4 + 128, r, v);
 	AES_ENC_ROUND(3 * 4 + 144, v, r);
 
-	MIX
+	MIX_512
 
 	load[1] = s2 | ((uint64_t)s3) << 32;
 	hash[TX * 4] = load[1] ^ msg[8 * TX + 1];
@@ -503,6 +503,93 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	load[1] ^= load[0];
 
 	hash[TX * 4 + 3] = load[1];
+}
+
+#define GLOBAL_LOAD_SHARED_SETUP_256 \
+		register uint32_t r0, r1, r2, r3; \
+		register uint32_t s0, s1, s2, s3; \
+		register uint32_t t0, t1, t2, t3; \
+		register uint64_t load[2]; \
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[2 * TX]; \
+		s0 = load[0]; \
+		s1 = load[0] >> 32; \
+		s2 = load[1]; \
+		s3 = load[1] >> 32; \
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[2 * TX + 1]; \
+		t0 = load[0]; \
+		t1 = load[0] >> 32; \
+		t2 = load[1]; \
+		t3 = load[1] >> 32;
+
+
+#define MIX_256 \
+	r0 = s1; \
+	r1 = s3; \
+\
+	s1 = t0; \
+	t0 = s2; \
+	s2 = r0; \
+\
+	s3 = t1; \
+	t1 = t2; \
+	t2 = r1;
+
+__global__ void haraka256Kernel(const uint64_t* msg, uint64_t* hash, const uint32_t num_msgs)
+{
+	COPY_CONSTANT_SHARED_ENC
+
+	if (TX >= (num_msgs))
+		return;
+
+	GLOBAL_LOAD_SHARED_SETUP_256
+
+	AES_ENC_ROUND(0 * 4, r, s);
+	AES_ENC_ROUND(0 * 4 + 8, s, r);
+
+	AES_ENC_ROUND(1 * 4, r, t);
+	AES_ENC_ROUND(1 * 4 + 8, t, r);
+
+	MIX_256
+
+	AES_ENC_ROUND(0 * 4 + 16, r, s);
+	AES_ENC_ROUND(0 * 4 + 24, s, r);
+
+	AES_ENC_ROUND(1 * 4 + 16, r, t);
+	AES_ENC_ROUND(1 * 4 + 24, t, r);
+
+	MIX_256
+
+	AES_ENC_ROUND(0 * 4 + 32, r, s);
+	AES_ENC_ROUND(0 * 4 + 40, s, r);
+
+	AES_ENC_ROUND(1 * 4 + 32, r, t);
+	AES_ENC_ROUND(1 * 4 + 40, t, r);
+
+	MIX_256
+
+	AES_ENC_ROUND(0 * 4 + 48, r, s);
+	AES_ENC_ROUND(0 * 4 + 56, s, r);
+
+	AES_ENC_ROUND(1 * 4 + 48, r, t);
+	AES_ENC_ROUND(1 * 4 + 56, t, r);
+
+	MIX_256
+
+	AES_ENC_ROUND(0 * 4 + 64, r, s);
+	AES_ENC_ROUND(0 * 4 + 72, s, r);
+
+	AES_ENC_ROUND(1 * 4 + 64, r, t);
+	AES_ENC_ROUND(1 * 4 + 72, t, r);
+
+	MIX_256
+
+	load[0] ^= (t0 | ((uint64_t)t1) << 32);
+	load[1] ^= (t2 | ((uint64_t)t3) << 32);
+	reinterpret_cast<uint4*>(hash)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[0];
+
+	load[0] = (s0 | ((uint64_t)s1) << 32) ^ msg[4 * TX];
+	load[1] = (s2 | ((uint64_t)s3) << 32) ^ msg[4 * TX + 1];
+	reinterpret_cast<uint4*>(hash)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
 }
 
 
@@ -591,10 +678,10 @@ cudaError_t harakaCuda512(const char* msgs, char* hashes, const uint32_t num_msg
 	checkCudaError(cudaSetDevice(0));
 
 	char* msg_device;
-	checkCudaError(cudaMalloc((void**)&msg_device, msgs_per_stream * MSG_SIZE_BYTE_512 * sizeof(char)));
+	checkCudaError(cudaMalloc((void**)&msg_device, (num_msgs + NUM_STREAMS - 1) / NUM_STREAMS * MSG_SIZE_BYTE_512 * sizeof(char)));
 
 	char* hash_device;
-	checkCudaError(cudaMalloc((void**)&hash_device, msgs_per_stream * HASH_SIZE_BYTE * sizeof(char)));
+	checkCudaError(cudaMalloc((void**)&hash_device, (num_msgs + NUM_STREAMS - 1) / NUM_STREAMS * HASH_SIZE_BYTE * sizeof(char)));
 
 	cudaStream_t streams[NUM_STREAMS];
 
@@ -617,6 +704,58 @@ cudaError_t harakaCuda512(const char* msgs, char* hashes, const uint32_t num_msg
 
 		//launch kernel
 		haraka512Kernel << <grid_size, block_dim, 0, rem_stream >> > ((uint64_t*)msg_device, (uint64_t*)hash_device, remaining_msgs);
+
+		checkCudaError(cudaMemcpyAsync(&hashes[msgs_per_stream * NUM_STREAMS * HASH_SIZE_BYTE], hash_device, remaining_msgs * HASH_SIZE_BYTE, cudaMemcpyDeviceToHost, rem_stream));
+	}
+	checkCudaError(cudaGetLastError());
+	checkCudaError(cudaDeviceSynchronize());
+
+	//copy result back
+
+	cudaFree(msg_device);
+	cudaFree(hash_device);
+
+	return cudaSuccess;
+}
+
+
+cudaError_t harakaCuda256(const char* msgs, char* hashes, const uint32_t num_msgs)
+{
+	uint32_t msgs_per_stream = num_msgs / NUM_STREAMS;
+	uint32_t remaining_msgs = num_msgs - NUM_STREAMS * msgs_per_stream;
+
+	uint32_t grid_size = (num_msgs * MSG_SIZE_BYTE_256 + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+	dim3 block_dim(MAX_THREAD);
+
+	checkCudaError(cudaSetDevice(0));
+
+	char* msg_device;
+	checkCudaError(cudaMalloc((void**)&msg_device, (num_msgs + NUM_STREAMS - 1) / NUM_STREAMS * MSG_SIZE_BYTE_256 * sizeof(char)));
+
+	char* hash_device;
+	checkCudaError(cudaMalloc((void**)&hash_device, (num_msgs + NUM_STREAMS - 1) / NUM_STREAMS * HASH_SIZE_BYTE * sizeof(char)));
+
+	cudaStream_t streams[NUM_STREAMS];
+
+	for (int i = 0; i < NUM_STREAMS; ++i)
+	{
+		cudaStreamCreate(&streams[i]);
+		checkCudaError(cudaMemcpyAsync((void *)msg_device, &msgs[msgs_per_stream * MSG_SIZE_BYTE_256 * i], msgs_per_stream * MSG_SIZE_BYTE_256, cudaMemcpyHostToDevice, streams[i]));
+
+		//launch kernel
+		haraka256Kernel << <grid_size, block_dim, 0, streams[i] >> > ((uint64_t*)msg_device, (uint64_t*)hash_device, msgs_per_stream);
+
+		checkCudaError(cudaMemcpyAsync(&hashes[msgs_per_stream * HASH_SIZE_BYTE * i], hash_device, msgs_per_stream * HASH_SIZE_BYTE, cudaMemcpyDeviceToHost, streams[i]));
+	}
+
+	if (remaining_msgs > 0)
+	{
+		cudaStream_t rem_stream;
+		cudaStreamCreate(&rem_stream);
+		checkCudaError(cudaMemcpyAsync((void *)msg_device, &msgs[msgs_per_stream * NUM_STREAMS * MSG_SIZE_BYTE_256], remaining_msgs * MSG_SIZE_BYTE_256, cudaMemcpyHostToDevice, rem_stream));
+
+		//launch kernel
+		haraka256Kernel << <grid_size, block_dim, 0, rem_stream >> > ((uint64_t*)msg_device, (uint64_t*)hash_device, remaining_msgs);
 
 		checkCudaError(cudaMemcpyAsync(&hashes[msgs_per_stream * NUM_STREAMS * HASH_SIZE_BYTE], hash_device, remaining_msgs * HASH_SIZE_BYTE, cudaMemcpyDeviceToHost, rem_stream));
 	}
