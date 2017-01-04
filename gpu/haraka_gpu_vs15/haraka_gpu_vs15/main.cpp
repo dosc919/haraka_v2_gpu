@@ -16,9 +16,11 @@ const uint32_t NUM_MESSAGES = 4194304;
 const uint32_t NUM_MEASURMENTS = 10;
 
 //#define TEST_PERFORMANCE_512
-//#define TEST_FUNCTIONALITY_512
-//#define TEST_PERFORMANCE_265
-#define TEST_FUNCTIONALITY_256
+#define TEST_FUNCTIONALITY_512
+
+//#define TEST_PERFORMANCE_256
+//#define TEST_FUNCTIONALITY_256
+
 //#define TEST_OTS
 
 
@@ -231,6 +233,55 @@ const int testFunctionality512()
 	return status;
 }
 
+void testPerformance256()
+{
+	float sum = 0;
+	float times[NUM_MEASURMENTS];
+
+	uint64_t t_begin;
+	uint64_t t_end;
+	uint64_t freq;
+
+	// First create an instance of an engine.
+	random_device rnd_device;
+	// Specify the engine and distribution.
+	mt19937 mersenne_engine(rnd_device());
+	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
+
+	auto gen = bind(dist, mersenne_engine);
+
+	for (int j = 0; j < NUM_MEASURMENTS; ++j)
+	{
+		char* input;
+		cudaMallocHost((void**)&input, MSG_SIZE_BYTE_256 * NUM_MESSAGES);
+
+		char* hash;
+		cudaMallocHost((void**)&hash, HASH_SIZE_BYTE * NUM_MESSAGES);
+
+		generate(input, input + MSG_SIZE_BYTE_256 * NUM_MESSAGES - 1, gen);
+
+		QueryPerformanceCounter((LARGE_INTEGER *)&t_begin);
+
+		harakaCuda256(input, hash, NUM_MESSAGES);
+
+		QueryPerformanceCounter((LARGE_INTEGER *)&t_end);
+		QueryPerformanceFrequency((LARGE_INTEGER *)&freq);
+
+		times[j] = ((t_end - t_begin) * 1000.0 / freq);
+
+		if (j > 1)
+			sum += times[j];
+
+		cout << times[j] << endl;
+
+		cudaFreeHost(input);
+		cudaFreeHost(hash);
+	}
+
+	qsort(times, NUM_MEASURMENTS, sizeof(float), cmp_f);
+	cout << "median: " << times[NUM_MEASURMENTS / 2] << " ms\n   mid: " << sum / (NUM_MEASURMENTS - 2) << " ms" << endl;
+}
+
 const int testFunctionality256()
 {
 	char* input = new char[MSG_SIZE_BYTE_256 * NUM_MESSAGES];
@@ -282,6 +333,11 @@ int main()
 	else
 		cout << ERROR_CUDA_STRING << endl;
 #endif
+
+#ifdef TEST_PERFORMANCE_256
+	testPerformance256();
+#endif
+
 #ifdef TEST_FUNCTIONALITY_256
 	status = testFunctionality256();
 

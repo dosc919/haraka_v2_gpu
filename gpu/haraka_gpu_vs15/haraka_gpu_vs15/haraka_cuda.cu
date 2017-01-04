@@ -312,14 +312,14 @@ __constant__ const uint32_t RC[256] = {\
 	0xcb1e6950, 0xf957332b, 0xa2531159, 0x3bf327c1, \
 	0x2cee0c75, 0x00da619c, 0xe4ed0353, 0x600ed0d9, \
 	0xf0b1a5a1, 0x96e90cab, 0x80bbbabc, 0x63a4a350, \
-	0xae3db102, 0x5e962988, 0xab0dde30, 0x938dca39, \
-	0x17bb8f38, 0xd554a40b, 0x8814f3a8, 0x2e75b442, \
-	0x34bb8a5b, 0x5f427fd7, 0xaeb6b779, 0x360a16f6, \
-	0x26f65241, 0xcbe55438, 0x43ce5918, 0xffbaafde, \
-	0x4ce99a54, 0xb9f3026a, 0xa2ca9cf7, 0x839ec978, \
-	0xae51a51a, 0x1bdff7be, 0x40c06e28, 0x22901235, \
-	0xa0c1613c, 0xba7ed22b, 0xc173bc0f, 0x48a659cf, \
-	0x756acc03, 0x02288288, 0x4ad6bdfd, 0xe9c59da1, \
+0xae3db102, 0x5e962988, 0xab0dde30, 0x938dca39, \
+0x17bb8f38, 0xd554a40b, 0x8814f3a8, 0x2e75b442, \
+0x34bb8a5b, 0x5f427fd7, 0xaeb6b779, 0x360a16f6, \
+0x26f65241, 0xcbe55438, 0x43ce5918, 0xffbaafde, \
+0x4ce99a54, 0xb9f3026a, 0xa2ca9cf7, 0x839ec978, \
+0xae51a51a, 0x1bdff7be, 0x40c06e28, 0x22901235, \
+0xa0c1613c, 0xba7ed22b, 0xc173bc0f, 0x48a659cf, \
+0x756acc03, 0x02288288, 0x4ad6bdfd, 0xe9c59da1, \
  };
 
 
@@ -385,31 +385,26 @@ __constant__ const uint32_t RC[256] = {\
 
 #define MIX_512 \
 	r0 = s0; \
-	r1 = s1; \
-	r2 = s2; \
+	r1 = u2; \
 \
 	s0 = s3; \
-	s1 = u3; \
-	s2 = t3; \
 	s3 = v3; \
-\
-	t3 = t0; \
-	u3 = t1; \
 	v3 = v2; \
-\
-	t0 = u0; \
-	t1 = r0; \
 	v2 = t2; \
-\
-	u0 = u1; \
 	t2 = v0; \
+	v0 = s2; \
+	s2 = t3; \
+	t3 = t0; \
+	t0 = u0; \
+	u0 = u1; \
+	u1 = s1; \
+	s1 = u3; \
+	u3 = t1; \
+	t1 = r0; \
 \
-	u1 = r1; \
-	v0 = r2; \
-	r3 = v1; \
-	v1 = u2; \
-	u2 = r3;
-
+	u2 = v1; \
+	v1 = r1;
+	
 
 __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint32_t num_msgs)
 {
@@ -509,17 +504,17 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 		register uint32_t r0, r1, r2, r3; \
 		register uint32_t s0, s1, s2, s3; \
 		register uint32_t t0, t1, t2, t3; \
-		register uint64_t load[2]; \
+		register uint64_t load[4]; \
 		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[2 * TX]; \
 		s0 = load[0]; \
 		s1 = load[0] >> 32; \
 		s2 = load[1]; \
 		s3 = load[1] >> 32; \
-		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[2 * TX + 1]; \
-		t0 = load[0]; \
-		t1 = load[0] >> 32; \
-		t2 = load[1]; \
-		t3 = load[1] >> 32;
+		reinterpret_cast<uint4*>(load)[1] = reinterpret_cast<const uint4*>(msg)[2 * TX + 1]; \
+		t0 = load[2]; \
+		t1 = load[2] >> 32; \
+		t2 = load[3]; \
+		t3 = load[3] >> 32;
 
 
 #define MIX_256 \
@@ -583,13 +578,13 @@ __global__ void haraka256Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 
 	MIX_256
 
-	load[0] ^= (t0 | ((uint64_t)t1) << 32);
-	load[1] ^= (t2 | ((uint64_t)t3) << 32);
-	reinterpret_cast<uint4*>(hash)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[0];
-
-	load[0] = (s0 | ((uint64_t)s1) << 32) ^ msg[4 * TX];
-	load[1] = (s2 | ((uint64_t)s3) << 32) ^ msg[4 * TX + 1];
+	load[0] ^= (s0 | ((uint64_t)s1) << 32);
+	load[1] ^= (s2 | ((uint64_t)s3) << 32);
 	reinterpret_cast<uint4*>(hash)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
+
+	load[2] ^= (t0 | ((uint64_t)t1) << 32);
+	load[3] ^= (t2 | ((uint64_t)t3) << 32);
+	reinterpret_cast<uint4*>(hash)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
 }
 
 
