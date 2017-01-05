@@ -117,7 +117,7 @@ int haraka512256(char *hash, const char *msg)
 int haraka256256(char *hash, const char *msg) {
 	// stuff we need
 	int i, j;
-	__m128i s[2], tmp, rcon, rc[20];
+	__m128i s[2], tmp, rc[20];
 	__m128i MSB64 = _mm_set_epi32(0xFFFFFFFF, 0xFFFFFFFF, 0, 0);
 
 	// define round constants
