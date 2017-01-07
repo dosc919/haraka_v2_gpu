@@ -498,17 +498,17 @@ __global__ void haraka512Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	hash[TX * 4 + 3] = load[1];
 }
 
-#define GLOBAL_LOAD_SHARED_SETUP_256 \
+#define GLOBAL_LOAD_SHARED_SETUP_256(input) \
 		register uint32_t r0, r1, r2, r3; \
 		register uint32_t s0, s1, s2, s3; \
 		register uint32_t t0, t1, t2, t3; \
 		register uint64_t load[4]; \
-		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(msg)[2 * TX]; \
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(input)[2 * TX]; \
 		s0 = load[0]; \
 		s1 = load[0] >> 32; \
 		s2 = load[1]; \
 		s3 = load[1] >> 32; \
-		reinterpret_cast<uint4*>(load)[1] = reinterpret_cast<const uint4*>(msg)[2 * TX + 1]; \
+		reinterpret_cast<uint4*>(load)[1] = reinterpret_cast<const uint4*>(input)[2 * TX + 1]; \
 		t0 = load[2]; \
 		t1 = load[2] >> 32; \
 		t2 = load[3]; \
@@ -534,7 +534,7 @@ __global__ void haraka256Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	if (TX >= (num_msgs))
 		return;
 
-	GLOBAL_LOAD_SHARED_SETUP_256
+	GLOBAL_LOAD_SHARED_SETUP_256(msg)
 
 	AES_ENC_ROUND(0 * 4, r, s);
 	AES_ENC_ROUND(0 * 4 + 8, s, r);
@@ -585,14 +585,14 @@ __global__ void haraka256Kernel(const uint64_t* msg, uint64_t* hash, const uint3
 	reinterpret_cast<uint4*>(hash)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
 }
 
-__global__ void harakaOTSKernel(const uint64_t* msg, uint64_t* hash, uint16_t* checksum, const uint32_t num_msgs)
+__global__ void harakaOTSKernel(const uint64_t* msg, uint16_t* b, const uint32_t num_msgs)
 {
 	COPY_CONSTANT_SHARED_ENC
 
 	if (TX >= (num_msgs))
 		return;
 
-	GLOBAL_LOAD_SHARED_SETUP_256
+	GLOBAL_LOAD_SHARED_SETUP_256(msg)
 
 	AES_ENC_ROUND(0 * 4, r, s);
 	AES_ENC_ROUND(0 * 4 + 8, s, r);
@@ -636,79 +636,251 @@ __global__ void harakaOTSKernel(const uint64_t* msg, uint64_t* hash, uint16_t* c
 
 	load[0] ^= (s0 | ((uint64_t)s1) << 32);
 	load[1] ^= (s2 | ((uint64_t)s3) << 32);
-	reinterpret_cast<uint4*>(hash)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
 
 	load[2] ^= (t0 | ((uint64_t)t1) << 32);
 	load[3] ^= (t2 | ((uint64_t)t3) << 32);
-	reinterpret_cast<uint4*>(hash)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
 
-	uint16_t checksum_ = 256 - reinterpret_cast<uint8_t*>(load)[0];
+#pragma unroll
+	for(int i = 1; i < 17; ++i)
+		b[17 * TX + i] = reinterpret_cast<uint16_t*>(load)[i - 1];
+
+	uint16_t checksum = 256 - reinterpret_cast<uint8_t*>(load)[0];
 
 #pragma unroll
 	for (int i = 1; i < 32; ++i)
-		checksum_ += (256 - reinterpret_cast<uint8_t*>(load)[i]);
+		checksum += (256 - reinterpret_cast<uint8_t*>(load)[i]);
 
-	checksum[TX] = checksum_;
+	b[17 * TX] = checksum;
 }
 
-
-// add & output carry flag
-#define UADDO(c, a, b) asm volatile("add.cc.u32 %0, %1, %2;" : "=r"(c) : "r"(a), "r"(b));
-// add with carry & output carry flag
-#define UADDC(c, a, b) asm volatile("addc.cc.u32 %0, %1, %2;" : "=r"(c) : "r"(a), "r"(b));
-
-__global__ void winternitzOTS(const uint64_t* hash, const uint64_t* pkey, uint64_t* sig_data, const uint32_t num_msgs)
+__global__ void harakaOTSCalcPublicKeyKernel(const uint64_t* priv_key, uint64_t* pub_key, const uint32_t num_chunks)
 {
-	if (TX >= (num_msgs))
+	COPY_CONSTANT_SHARED_ENC
+
+	if (TX >= (num_chunks))
 		return;
 
-	register uint32_t private_key[4 * 6];
+	GLOBAL_LOAD_SHARED_SETUP_256(priv_key)
 
-	for(int i = 0; i < 6; ++i)
-		reinterpret_cast<uint4*>(private_key)[i] = reinterpret_cast<const uint4*>(pkey)[TX * 6 + i];
-
-	register uint32_t y[4 * 6];
-
-	for (int i = 0; i < 6; ++i)
+#pragma unroll
+	for (int i = 0; i < 255; ++i)
 	{
-		UADDO(y[4 * i], private_key[4 * i], UINT32_MAX)
-		UADDC(y[4 * i + 1], private_key[4 * i + 1], 0)
-		UADDC(y[4 * i + 2], private_key[4 * i + 2], 0)
-		UADDC(y[4 * i + 3], private_key[4 * i + 3], 0)
+		AES_ENC_ROUND(0 * 4, r, s);
+		AES_ENC_ROUND(0 * 4 + 8, s, r);
+
+		AES_ENC_ROUND(1 * 4, r, t);
+		AES_ENC_ROUND(1 * 4 + 8, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 16, r, s);
+		AES_ENC_ROUND(0 * 4 + 24, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 16, r, t);
+		AES_ENC_ROUND(1 * 4 + 24, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 32, r, s);
+		AES_ENC_ROUND(0 * 4 + 40, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 32, r, t);
+		AES_ENC_ROUND(1 * 4 + 40, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 48, r, s);
+		AES_ENC_ROUND(0 * 4 + 56, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 48, r, t);
+		AES_ENC_ROUND(1 * 4 + 56, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 64, r, s);
+		AES_ENC_ROUND(0 * 4 + 72, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 64, r, t);
+		AES_ENC_ROUND(1 * 4 + 72, t, r);
+
+		MIX_256
+
+		load[0] ^= (s0 | ((uint64_t)s1) << 32);
+		load[1] ^= (s2 | ((uint64_t)s3) << 32);
+		load[2] ^= (t0 | ((uint64_t)t1) << 32);
+		load[3] ^= (t2 | ((uint64_t)t3) << 32);
+
+		if (i < 255)
+		{
+			s0 = load[0];
+			s1 = load[0] >> 32;
+			s2 = load[1];
+			s3 = load[1] >> 32;
+
+			t0 = load[2];
+			t1 = load[2] >> 32;
+			t2 = load[3];
+			t3 = load[3] >> 32;
+		}
 	}
 
-	register uint32_t hash_reg[4];
-	reinterpret_cast<uint4*>(hash_reg)[0] = reinterpret_cast<const uint4*>(hash)[TX];
+	reinterpret_cast<uint4*>(pub_key)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
 
-	register uint32_t b[6];
-	register uint64_t c = 0;
+	reinterpret_cast<uint4*>(pub_key)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
+}
 
-	for (int i = 2; i < 6; ++i)
+__global__ void harakaOTSCalcSignatureKernel(const uint64_t* priv_key, uint64_t* signature, uint8_t* b, const uint32_t num_chunks)
+{
+	COPY_CONSTANT_SHARED_ENC
+
+	if (TX >= (num_chunks))
+		return;
+
+	GLOBAL_LOAD_SHARED_SETUP_256(priv_key)
+
+	uint8_t b_ = b[TX];
+
+	for (uint8_t i = 0; i < b_; ++i)
 	{
-		b[i] = hash_reg[i - 2];
-		c += UINT32_MAX - (b[i] + 1);
+		AES_ENC_ROUND(0 * 4, r, s);
+		AES_ENC_ROUND(0 * 4 + 8, s, r);
+
+		AES_ENC_ROUND(1 * 4, r, t);
+		AES_ENC_ROUND(1 * 4 + 8, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 16, r, s);
+		AES_ENC_ROUND(0 * 4 + 24, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 16, r, t);
+		AES_ENC_ROUND(1 * 4 + 24, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 32, r, s);
+		AES_ENC_ROUND(0 * 4 + 40, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 32, r, t);
+		AES_ENC_ROUND(1 * 4 + 40, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 48, r, s);
+		AES_ENC_ROUND(0 * 4 + 56, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 48, r, t);
+		AES_ENC_ROUND(1 * 4 + 56, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 64, r, s);
+		AES_ENC_ROUND(0 * 4 + 72, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 64, r, t);
+		AES_ENC_ROUND(1 * 4 + 72, t, r);
+
+		MIX_256
+
+		load[0] ^= (s0 | ((uint64_t)s1) << 32);
+		load[1] ^= (s2 | ((uint64_t)s3) << 32);
+		load[2] ^= (t0 | ((uint64_t)t1) << 32);
+		load[3] ^= (t2 | ((uint64_t)t3) << 32);
+
+		if (i < 255)
+		{
+			s0 = load[0];
+			s1 = load[0] >> 32;
+			s2 = load[1];
+			s3 = load[1] >> 32;
+
+			t0 = load[2];
+			t1 = load[2] >> 32;
+			t2 = load[3];
+			t3 = load[3] >> 32;
+		}
 	}
 
-	for (int i = 0; i < 2; ++i)
+	reinterpret_cast<uint4*>(signature)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
+
+	reinterpret_cast<uint4*>(signature)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
+}
+
+__global__ void harakaOTSCalcVerificationKernel(const uint64_t* signature, uint64_t* verification, uint8_t* b, const uint32_t num_chunks)
+{
+	COPY_CONSTANT_SHARED_ENC
+
+	if (TX >= (num_chunks))
+		return;
+
+	GLOBAL_LOAD_SHARED_SETUP_256(signature)
+
+	uint8_t b_ = UINT8_MAX - b[TX];
+
+	for (uint8_t i = 0; i < b_; ++i)
 	{
-		b[i] = (c >> (i * 32));
+		AES_ENC_ROUND(0 * 4, r, s);
+		AES_ENC_ROUND(0 * 4 + 8, s, r);
+
+		AES_ENC_ROUND(1 * 4, r, t);
+		AES_ENC_ROUND(1 * 4 + 8, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 16, r, s);
+		AES_ENC_ROUND(0 * 4 + 24, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 16, r, t);
+		AES_ENC_ROUND(1 * 4 + 24, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 32, r, s);
+		AES_ENC_ROUND(0 * 4 + 40, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 32, r, t);
+		AES_ENC_ROUND(1 * 4 + 40, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 48, r, s);
+		AES_ENC_ROUND(0 * 4 + 56, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 48, r, t);
+		AES_ENC_ROUND(1 * 4 + 56, t, r);
+
+		MIX_256
+
+		AES_ENC_ROUND(0 * 4 + 64, r, s);
+		AES_ENC_ROUND(0 * 4 + 72, s, r);
+
+		AES_ENC_ROUND(1 * 4 + 64, r, t);
+		AES_ENC_ROUND(1 * 4 + 72, t, r);
+
+		MIX_256
+
+		load[0] ^= (s0 | ((uint64_t)s1) << 32);
+		load[1] ^= (s2 | ((uint64_t)s3) << 32);
+		load[2] ^= (t0 | ((uint64_t)t1) << 32);
+		load[3] ^= (t2 | ((uint64_t)t3) << 32);
+
+		if (i < 255)
+		{
+			s0 = load[0];
+			s1 = load[0] >> 32;
+			s2 = load[1];
+			s3 = load[1] >> 32;
+
+			t0 = load[2];
+			t1 = load[2] >> 32;
+			t2 = load[3];
+			t3 = load[3] >> 32;
+		}
 	}
 
-	uint32_t signature[4 * 6];
+	reinterpret_cast<uint4*>(verification)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
 
-	for (int i = 0; i < 6; ++i)
-	{
-		UADDO(signature[4 * i], private_key[4 * i], b[i])
-		UADDC(signature[4 * i + 1], private_key[4 * i + 1], 0)
-		UADDC(signature[4 * i + 2], private_key[4 * i + 2], 0)
-		UADDC(signature[4 * i + 3], private_key[4 * i + 3], 0)
-	}
-
-	for (int i = 0; i < 6; ++i)
-		reinterpret_cast<uint4*>(sig_data)[TX * 12 + i] = reinterpret_cast<uint4*>(signature)[i];
-
-	for (int i = 0; i < 6; ++i)
-		reinterpret_cast<uint4*>(sig_data)[TX * 12 + i + 6] = reinterpret_cast<const uint4*>(y)[i];
+	reinterpret_cast<uint4*>(verification)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
 }
 
 
@@ -838,21 +1010,18 @@ int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys,
 
 	//get hashes
 
-	uint32_t grid_size = (num_msgs * MSG_SIZE_BYTE_256 + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+	uint32_t grid_size_haraka = (num_msgs * MSG_SIZE_BYTE_256 + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
 	dim3 block_dim(MAX_THREAD);
 
 	char* msg_device;
 	checkCudaError(cudaMalloc((void**)&msg_device, num_msgs * MSG_SIZE_BYTE_256 * sizeof(char)));
 
-	char* hash_device;
-	checkCudaError(cudaMalloc((void**)&hash_device, num_msgs * HASH_SIZE_BYTE * sizeof(char)));
-
-	char* checksum_device;
-	checkCudaError(cudaMalloc((void**)&checksum_device, num_msgs * T2 * sizeof(char)));
+	char* b_device;
+	checkCudaError(cudaMalloc((void**)&b_device, num_msgs * (HASH_SIZE_BYTE + T2) * sizeof(char)));
 
 	checkCudaError(cudaMemcpyAsync((void *)msg_device, msgs, num_msgs * MSG_SIZE_BYTE_256, cudaMemcpyHostToDevice));
 
-	harakaOTSKernel<< <grid_size, block_dim>> >((uint64_t*)msg_device, (uint64_t*)hash_device, (uint16_t*)checksum_device, num_msgs);
+	harakaOTSKernel<< <grid_size_haraka, block_dim>> >((uint64_t*)msg_device, (uint16_t*)b_device, num_msgs);
 
 
 	//get private key
@@ -872,19 +1041,25 @@ int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys,
 
 	checkCudaError(cudaMemcpyAsync((void *)private_key_device, private_key, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyHostToDevice));
 
+	uint32_t grid_size_winternitz = (num_msgs * T * HASH_SIZE_BYTE + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+
 	//launch kernel pubkey
+	harakaOTSCalcPublicKeyKernel << <grid_size_winternitz, block_dim >> >((uint64_t*)private_key_device, (uint64_t*)signature_device, num_msgs * T);
 
 	checkCudaError(cudaMemcpyAsync(pub_keys, signature_device, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyDeviceToHost));
 
 	//get signatures
 
 	//launch kernel signatures
+	harakaOTSCalcSignatureKernel << <grid_size_winternitz, block_dim >> >((uint64_t*)private_key_device, (uint64_t*)signature_device, (uint8_t*)b_device, num_msgs * T);
 
 	checkCudaError(cudaMemcpyAsync(signatures, signature_device, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyDeviceToHost));
 
+	checkCudaError(cudaGetLastError());
+	checkCudaError(cudaDeviceSynchronize());
+
 	cudaFree(msg_device);
-	cudaFree(hash_device);
-	cudaFree(checksum_device);
+	cudaFree(b_device);
 	cudaFree(private_key_device);
 	cudaFree(signature_device);
 
@@ -895,10 +1070,43 @@ int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys,
 int harakaWinternitzCudaVerify(const char* msgs, const char* signatures, const char* pub_keys, const uint32_t num_msgs)
 {
 	//get hashes
+	uint32_t grid_size_haraka = (num_msgs * MSG_SIZE_BYTE_256 + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+	dim3 block_dim(MAX_THREAD);
+
+	char* msg_device;
+	checkCudaError(cudaMalloc((void**)&msg_device, num_msgs * MSG_SIZE_BYTE_256 * sizeof(char)));
+
+	char* b_device;
+	checkCudaError(cudaMalloc((void**)&b_device, num_msgs * (HASH_SIZE_BYTE + T2) * sizeof(char)));
+
+	checkCudaError(cudaMemcpyAsync((void *)msg_device, msgs, num_msgs * MSG_SIZE_BYTE_256, cudaMemcpyHostToDevice));
+
+	harakaOTSKernel << <grid_size_haraka, block_dim >> >((uint64_t*)msg_device, (uint16_t*)b_device, num_msgs);
 
 	//get verifiers
+	char* signature_device;
+	checkCudaError(cudaMalloc((void**)&signature_device, T * HASH_SIZE_BYTE * num_msgs * sizeof(char)));
 
-	//verify signatures
+	char* verification_device;
+	checkCudaError(cudaMalloc((void**)&verification_device, T * HASH_SIZE_BYTE * num_msgs * sizeof(char)));
 
-	return SUCCESS;
+	checkCudaError(cudaMemcpyAsync((void *)signature_device, signatures, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyHostToDevice));
+
+	uint32_t grid_size_winternitz = (num_msgs * T * HASH_SIZE_BYTE + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+
+	harakaOTSCalcVerificationKernel << <grid_size_winternitz, block_dim >> >((uint64_t*)signature_device, (uint64_t*)verification_device, (uint8_t*)b_device, num_msgs * T);
+
+	char* verification = new char[T * HASH_SIZE_BYTE * num_msgs];
+
+	checkCudaError(cudaMemcpyAsync(verification, verification_device, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyDeviceToHost));
+
+	checkCudaError(cudaGetLastError());
+	checkCudaError(cudaDeviceSynchronize());
+
+	cudaFree(msg_device);
+	cudaFree(b_device);
+	cudaFree(signature_device);
+	cudaFree(verification_device);
+
+	return memcmp(pub_keys, verification, T * HASH_SIZE_BYTE * num_msgs);
 }
