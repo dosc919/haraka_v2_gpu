@@ -12,7 +12,7 @@
 
 using namespace std;
 
-const uint32_t NUM_MESSAGES = 4194304;
+const uint32_t NUM_MESSAGES = 4194304; //128MB input for haraka256 and 256MB input for haraka 512
 const uint32_t NUM_MEASURMENTS = 10;
 
 //#define TEST_PERFORMANCE_512

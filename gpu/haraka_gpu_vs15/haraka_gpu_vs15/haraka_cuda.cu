@@ -653,83 +653,7 @@ __global__ void harakaOTSKernel(const uint64_t* msg, uint16_t* b, const uint32_t
 	b[17 * TX] = checksum;
 }
 
-__global__ void harakaOTSCalcPublicKeyKernel(const uint64_t* priv_key, uint64_t* pub_key, const uint32_t num_chunks)
-{
-	COPY_CONSTANT_SHARED_ENC
-
-	if (TX >= (num_chunks))
-		return;
-
-	GLOBAL_LOAD_SHARED_SETUP_256(priv_key)
-
-#pragma unroll
-	for (int i = 0; i < 255; ++i)
-	{
-		AES_ENC_ROUND(0 * 4, r, s);
-		AES_ENC_ROUND(0 * 4 + 8, s, r);
-
-		AES_ENC_ROUND(1 * 4, r, t);
-		AES_ENC_ROUND(1 * 4 + 8, t, r);
-
-		MIX_256
-
-		AES_ENC_ROUND(0 * 4 + 16, r, s);
-		AES_ENC_ROUND(0 * 4 + 24, s, r);
-
-		AES_ENC_ROUND(1 * 4 + 16, r, t);
-		AES_ENC_ROUND(1 * 4 + 24, t, r);
-
-		MIX_256
-
-		AES_ENC_ROUND(0 * 4 + 32, r, s);
-		AES_ENC_ROUND(0 * 4 + 40, s, r);
-
-		AES_ENC_ROUND(1 * 4 + 32, r, t);
-		AES_ENC_ROUND(1 * 4 + 40, t, r);
-
-		MIX_256
-
-		AES_ENC_ROUND(0 * 4 + 48, r, s);
-		AES_ENC_ROUND(0 * 4 + 56, s, r);
-
-		AES_ENC_ROUND(1 * 4 + 48, r, t);
-		AES_ENC_ROUND(1 * 4 + 56, t, r);
-
-		MIX_256
-
-		AES_ENC_ROUND(0 * 4 + 64, r, s);
-		AES_ENC_ROUND(0 * 4 + 72, s, r);
-
-		AES_ENC_ROUND(1 * 4 + 64, r, t);
-		AES_ENC_ROUND(1 * 4 + 72, t, r);
-
-		MIX_256
-
-		load[0] ^= (s0 | ((uint64_t)s1) << 32);
-		load[1] ^= (s2 | ((uint64_t)s3) << 32);
-		load[2] ^= (t0 | ((uint64_t)t1) << 32);
-		load[3] ^= (t2 | ((uint64_t)t3) << 32);
-
-		if (i < 255)
-		{
-			s0 = load[0];
-			s1 = load[0] >> 32;
-			s2 = load[1];
-			s3 = load[1] >> 32;
-
-			t0 = load[2];
-			t1 = load[2] >> 32;
-			t2 = load[3];
-			t3 = load[3] >> 32;
-		}
-	}
-
-	reinterpret_cast<uint4*>(pub_key)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
-
-	reinterpret_cast<uint4*>(pub_key)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
-}
-
-__global__ void harakaOTSCalcSignatureKernel(const uint64_t* priv_key, uint64_t* signature, uint8_t* b, const uint32_t num_chunks)
+__global__ void harakaOTSCreateSignatureKernel(const uint64_t* priv_key, uint64_t* pub_key, uint64_t* signature, const uint8_t* b, const uint32_t num_chunks)
 {
 	COPY_CONSTANT_SHARED_ENC
 
@@ -740,8 +664,15 @@ __global__ void harakaOTSCalcSignatureKernel(const uint64_t* priv_key, uint64_t*
 
 	uint8_t b_ = b[TX];
 
-	for (uint8_t i = 0; i < b_; ++i)
+#pragma unroll
+	for (int i = 0; i < 255; ++i)
 	{
+		if (i == b_)
+		{
+			reinterpret_cast<uint4*>(signature)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
+			reinterpret_cast<uint4*>(signature)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
+		}
+
 		AES_ENC_ROUND(0 * 4, r, s);
 		AES_ENC_ROUND(0 * 4 + 8, s, r);
 
@@ -801,12 +732,17 @@ __global__ void harakaOTSCalcSignatureKernel(const uint64_t* priv_key, uint64_t*
 		}
 	}
 
-	reinterpret_cast<uint4*>(signature)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
+	if (b_ == 255)
+	{
+		reinterpret_cast<uint4*>(signature)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
+		reinterpret_cast<uint4*>(signature)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
+	}
 
-	reinterpret_cast<uint4*>(signature)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
+	reinterpret_cast<uint4*>(pub_key)[2 * TX] = reinterpret_cast<uint4*>(load)[0];
+	reinterpret_cast<uint4*>(pub_key)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
 }
 
-__global__ void harakaOTSCalcVerificationKernel(const uint64_t* signature, uint64_t* verification, uint8_t* b, const uint32_t num_chunks)
+__global__ void harakaOTSCreateVerificationKernel(const uint64_t* signature, uint64_t* verification, uint8_t* b, const uint32_t num_chunks)
 {
 	COPY_CONSTANT_SHARED_ENC
 
@@ -1036,6 +972,9 @@ int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys,
 	char* private_key_device;
 	checkCudaError(cudaMalloc((void**)&private_key_device, T * HASH_SIZE_BYTE * num_msgs * sizeof(char)));
 
+	char* public_key_device;
+	checkCudaError(cudaMalloc((void**)&public_key_device, T * HASH_SIZE_BYTE * num_msgs * sizeof(char)));
+
 	char* signature_device;
 	checkCudaError(cudaMalloc((void**)&signature_device, T * HASH_SIZE_BYTE * num_msgs * sizeof(char)));
 
@@ -1043,15 +982,9 @@ int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys,
 
 	uint32_t grid_size_winternitz = (num_msgs * T * HASH_SIZE_BYTE + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
 
-	//launch kernel pubkey
-	harakaOTSCalcPublicKeyKernel << <grid_size_winternitz, block_dim >> >((uint64_t*)private_key_device, (uint64_t*)signature_device, num_msgs * T);
+	harakaOTSCreateSignatureKernel << <grid_size_winternitz, block_dim >> > ((uint64_t*)private_key_device, (uint64_t*)public_key_device, (uint64_t*)signature_device, (uint8_t*)b_device, num_msgs * T);
 
-	checkCudaError(cudaMemcpyAsync(pub_keys, signature_device, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyDeviceToHost));
-
-	//get signatures
-
-	//launch kernel signatures
-	harakaOTSCalcSignatureKernel << <grid_size_winternitz, block_dim >> >((uint64_t*)private_key_device, (uint64_t*)signature_device, (uint8_t*)b_device, num_msgs * T);
+	checkCudaError(cudaMemcpyAsync(pub_keys, public_key_device, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyDeviceToHost));
 
 	checkCudaError(cudaMemcpyAsync(signatures, signature_device, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyDeviceToHost));
 
@@ -1094,7 +1027,7 @@ int harakaWinternitzCudaVerify(const char* msgs, const char* signatures, const c
 
 	uint32_t grid_size_winternitz = (num_msgs * T * HASH_SIZE_BYTE + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
 
-	harakaOTSCalcVerificationKernel << <grid_size_winternitz, block_dim >> >((uint64_t*)signature_device, (uint64_t*)verification_device, (uint8_t*)b_device, num_msgs * T);
+	harakaOTSCreateVerificationKernel << <grid_size_winternitz, block_dim >> >((uint64_t*)signature_device, (uint64_t*)verification_device, (uint8_t*)b_device, num_msgs * T);
 
 	char* verification = new char[T * HASH_SIZE_BYTE * num_msgs];
 
