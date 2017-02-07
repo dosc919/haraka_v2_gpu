@@ -24,7 +24,7 @@ const uint32_t MSG_SIZE_BYTE_512 = 64;
 const uint32_t HASH_SIZE_BIT = 256;
 const uint32_t WINTERNITZ_PARAM = 8;
 const uint32_t T1 = (HASH_SIZE_BIT + WINTERNITZ_PARAM - 1) / WINTERNITZ_PARAM;
-const uint32_t T2 = (int(log2f(float(T1))) + WINTERNITZ_PARAM + WINTERNITZ_PARAM) / WINTERNITZ_PARAM;
+const uint32_t T2 = (int(log2f(float(T1))) + WINTERNITZ_PARAM + WINTERNITZ_PARAM - 1) / WINTERNITZ_PARAM;
 const uint32_t T = T1 + T2;
 
 const int32_t FAILED_TO_ACQUIRE_CRYPT_PROV = -1;

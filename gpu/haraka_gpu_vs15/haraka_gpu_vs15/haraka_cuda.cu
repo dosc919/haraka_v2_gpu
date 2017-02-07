@@ -751,7 +751,7 @@ __global__ void harakaOTSCreateVerificationKernel(const uint64_t* signature, uin
 
 	GLOBAL_LOAD_SHARED_SETUP_256(signature)
 
-	uint8_t b_ = UINT8_MAX - b[TX];
+		uint8_t b_ = UINT8_MAX - b[TX];
 
 	for (uint8_t i = 0; i < b_; ++i)
 	{
@@ -839,7 +839,7 @@ cudaError_t harakaCuda512(const char* msgs, char* hashes, const uint32_t num_msg
 	uint32_t msgs_per_stream = num_msgs / NUM_STREAMS;
 	uint32_t remaining_msgs = num_msgs - NUM_STREAMS * msgs_per_stream;
 
-	uint32_t grid_size = (num_msgs * MSG_SIZE_BYTE_512 + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+	uint32_t grid_size = (num_msgs + MAX_THREAD - 1) / MAX_THREAD;
 	dim3 block_dim(MAX_THREAD);
 
 	checkCudaError(cudaSetDevice(0));
@@ -891,7 +891,7 @@ cudaError_t harakaCuda256(const char* msgs, char* hashes, const uint32_t num_msg
 	uint32_t msgs_per_stream = num_msgs / NUM_STREAMS;
 	uint32_t remaining_msgs = num_msgs - NUM_STREAMS * msgs_per_stream;
 
-	uint32_t grid_size = (num_msgs * MSG_SIZE_BYTE_256 + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+	uint32_t grid_size = (num_msgs + MAX_THREAD - 1) / MAX_THREAD;
 	dim3 block_dim(MAX_THREAD);
 
 	checkCudaError(cudaSetDevice(0));
@@ -946,7 +946,7 @@ int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys,
 
 	//get hashes
 
-	uint32_t grid_size_haraka = (num_msgs * MSG_SIZE_BYTE_256 + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+	uint32_t grid_size_haraka = (num_msgs + MAX_THREAD - 1) / MAX_THREAD;
 	dim3 block_dim(MAX_THREAD);
 
 	char* msg_device;
@@ -958,7 +958,8 @@ int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys,
 	checkCudaError(cudaMemcpyAsync((void *)msg_device, msgs, num_msgs * MSG_SIZE_BYTE_256, cudaMemcpyHostToDevice));
 
 	harakaOTSKernel<< <grid_size_haraka, block_dim>> >((uint64_t*)msg_device, (uint16_t*)b_device, num_msgs);
-
+	checkCudaError(cudaGetLastError());
+	checkCudaError(cudaDeviceSynchronize());
 
 	//get private key
 	if (!CryptAcquireContext(&hCryptProv, NULL, NULL, PROV_RSA_FULL, 0))
@@ -980,9 +981,11 @@ int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys,
 
 	checkCudaError(cudaMemcpyAsync((void *)private_key_device, private_key, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyHostToDevice));
 
-	uint32_t grid_size_winternitz = (num_msgs * T * HASH_SIZE_BYTE + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+	uint32_t grid_size_winternitz = (num_msgs * T + MAX_THREAD - 1) / MAX_THREAD;
 
 	harakaOTSCreateSignatureKernel << <grid_size_winternitz, block_dim >> > ((uint64_t*)private_key_device, (uint64_t*)public_key_device, (uint64_t*)signature_device, (uint8_t*)b_device, num_msgs * T);
+	checkCudaError(cudaGetLastError());
+	checkCudaError(cudaDeviceSynchronize());
 
 	checkCudaError(cudaMemcpyAsync(pub_keys, public_key_device, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyDeviceToHost));
 
@@ -1003,7 +1006,7 @@ int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys,
 int harakaWinternitzCudaVerify(const char* msgs, const char* signatures, const char* pub_keys, const uint32_t num_msgs)
 {
 	//get hashes
-	uint32_t grid_size_haraka = (num_msgs * MSG_SIZE_BYTE_256 + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+	uint32_t grid_size_haraka = (num_msgs + MAX_THREAD - 1) / MAX_THREAD;
 	dim3 block_dim(MAX_THREAD);
 
 	char* msg_device;
@@ -1015,6 +1018,8 @@ int harakaWinternitzCudaVerify(const char* msgs, const char* signatures, const c
 	checkCudaError(cudaMemcpyAsync((void *)msg_device, msgs, num_msgs * MSG_SIZE_BYTE_256, cudaMemcpyHostToDevice));
 
 	harakaOTSKernel << <grid_size_haraka, block_dim >> >((uint64_t*)msg_device, (uint16_t*)b_device, num_msgs);
+	checkCudaError(cudaGetLastError());
+	checkCudaError(cudaDeviceSynchronize());
 
 	//get verifiers
 	char* signature_device;
@@ -1025,21 +1030,24 @@ int harakaWinternitzCudaVerify(const char* msgs, const char* signatures, const c
 
 	checkCudaError(cudaMemcpyAsync((void *)signature_device, signatures, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyHostToDevice));
 
-	uint32_t grid_size_winternitz = (num_msgs * T * HASH_SIZE_BYTE + MAX_THREAD * AES_BLOCK_SIZE * 4 - 1) / (MAX_THREAD * AES_BLOCK_SIZE * 4);
+	uint32_t grid_size_winternitz = (num_msgs * T + MAX_THREAD - 1) / MAX_THREAD;
 
 	harakaOTSCreateVerificationKernel << <grid_size_winternitz, block_dim >> >((uint64_t*)signature_device, (uint64_t*)verification_device, (uint8_t*)b_device, num_msgs * T);
+	checkCudaError(cudaGetLastError());
+	checkCudaError(cudaDeviceSynchronize());
 
 	char* verification = new char[T * HASH_SIZE_BYTE * num_msgs];
 
 	checkCudaError(cudaMemcpyAsync(verification, verification_device, T * HASH_SIZE_BYTE * num_msgs, cudaMemcpyDeviceToHost));
-
-	checkCudaError(cudaGetLastError());
-	checkCudaError(cudaDeviceSynchronize());
+	
 
 	cudaFree(msg_device);
 	cudaFree(b_device);
 	cudaFree(signature_device);
 	cudaFree(verification_device);
+
+	std::cout << memcmp(pub_keys, verification, T * HASH_SIZE_BYTE * num_msgs) << std::endl;
+	printf("%x | %x\n", pub_keys[0], verification[0]);
 
 	return memcmp(pub_keys, verification, T * HASH_SIZE_BYTE * num_msgs);
 }
