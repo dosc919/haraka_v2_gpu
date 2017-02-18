@@ -11,7 +11,7 @@ using namespace std;
 
 //Cuda defines
 const uint32_t MAX_THREAD = 256;
-const uint32_t NUM_STREAMS = 1;
+const uint32_t NUM_STREAMS = 16;
 
 //Haraka defines
 const uint32_t AES_BLOCK_SIZE = 16;

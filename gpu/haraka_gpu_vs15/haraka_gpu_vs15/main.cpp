@@ -12,7 +12,7 @@
 
 using namespace std;
 
-const uint32_t NUM_MESSAGES = 5000;//4194304; //128MB input for haraka256 and 256MB input for haraka 512
+const uint32_t NUM_MESSAGES = 200000;//200000;//4194304; //128MB input for haraka256 and 256MB input for haraka 512
 const uint32_t NUM_MEASURMENTS = 10;
 
 //#define TEST_PERFORMANCE_512
@@ -197,9 +197,12 @@ const int testFunctionality256()
 
 int testOTS()
 {
-	char* input = new char[MSG_SIZE_BYTE_256 * NUM_MESSAGES];
-	char* signatures = new char[HASH_SIZE_BYTE * T * NUM_MESSAGES];
-	char* pub_keys = new char[HASH_SIZE_BYTE * T * NUM_MESSAGES];
+	float sum = 0;
+	float times[NUM_MEASURMENTS];
+
+	uint64_t t_begin;
+	uint64_t t_end;
+	uint64_t freq;
 
 	// First create an instance of an engine.
 	random_device rnd_device;
@@ -208,25 +211,57 @@ int testOTS()
 	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
 
 	auto gen = bind(dist, mersenne_engine);
-	generate(input, input + MSG_SIZE_BYTE_256 * NUM_MESSAGES - 1, gen);
 
+	int status;
 
-	int status = harakaWinternitzCudaSign(input, signatures, pub_keys, NUM_MESSAGES);
-
-	if (status)
+	for (int j = 0; j < NUM_MEASURMENTS; ++j)
 	{
-		delete input;
-		delete signatures;
-		delete pub_keys;
+		char* input;
+		cudaMallocHost((void**)&input, MSG_SIZE_BYTE_256 * NUM_MESSAGES);
 
-		return status;
+		char* signatures;
+		cudaMallocHost((void**)&signatures, HASH_SIZE_BYTE * T * NUM_MESSAGES);
+
+		char* pub_keys;
+		cudaMallocHost((void**)&pub_keys, HASH_SIZE_BYTE * T * NUM_MESSAGES);
+
+		generate(input, input + MSG_SIZE_BYTE_256 * NUM_MESSAGES - 1, gen);
+
+		QueryPerformanceCounter((LARGE_INTEGER *)&t_begin);
+
+		status = harakaWinternitzCudaSign(input, signatures, pub_keys, NUM_MESSAGES);
+
+		QueryPerformanceCounter((LARGE_INTEGER *)&t_end);
+		QueryPerformanceFrequency((LARGE_INTEGER *)&freq);
+
+		if (status)
+		{
+			cudaFreeHost(input);
+			cudaFreeHost(signatures);
+			cudaFreeHost(pub_keys);
+
+			return status;
+		}
+
+		times[j] = ((t_end - t_begin) * 1000.0f / freq);
+
+		if (j > 1)
+			sum += times[j];
+
+		cout << times[j] << endl;
+
+		status = harakaWinternitzCudaVerify(input, signatures, pub_keys, NUM_MESSAGES);
+
+		cudaFreeHost(input);
+		cudaFreeHost(signatures);
+		cudaFreeHost(pub_keys);
+
+		if (status)
+			return status;
 	}
 
-	//status = harakaWinternitzCudaVerify(input, signatures, pub_keys, NUM_MESSAGES);
-	
-	delete input;
-	delete signatures;
-	delete pub_keys;
+	qsort(times, NUM_MEASURMENTS, sizeof(float), cmp_f);
+	cout << "median: " << times[NUM_MEASURMENTS / 2] << " ms\n   mid: " << sum / (NUM_MEASURMENTS - 2) << " ms" << endl;
 
 	return status;
 }
