@@ -1,5 +1,5 @@
 
-#include "haraka_cuda.h"
+#include "haraka_cuda_wrapper.h"
 #include "helper.h"
 #include "constants.h"
 
@@ -14,6 +14,7 @@ using namespace std;
 
 const uint32_t NUM_MESSAGES = 200000;//200000;//4194304; //128MB input for haraka256 and 256MB input for haraka 512
 const uint32_t NUM_MEASURMENTS = 10;
+const uint32_t TREE_DEPTH = 2;
 
 //#define TEST_PERFORMANCE_512
 //#define TEST_FUNCTIONALITY_512
@@ -21,7 +22,9 @@ const uint32_t NUM_MEASURMENTS = 10;
 //#define TEST_PERFORMANCE_256
 //#define TEST_FUNCTIONALITY_256
 
-#define TEST_OTS
+//#define TEST_OTS
+
+#define TEST_MERKLE_TREE
 
 
 int cmp_f(const void *x, const void *y)
@@ -41,9 +44,7 @@ void testPerformance512()
 	uint64_t t_end;
 	uint64_t freq;
 
-	// First create an instance of an engine.
 	random_device rnd_device;
-	// Specify the engine and distribution.
 	mt19937 mersenne_engine(rnd_device());
 	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
 
@@ -87,9 +88,7 @@ const int testFunctionality512()
 	char* hash = new char[HASH_SIZE_BYTE * NUM_MESSAGES];
 	char* hash_ref = new char[HASH_SIZE_BYTE * NUM_MESSAGES];
 
-	// First create an instance of an engine.
 	random_device rnd_device;
-	// Specify the engine and distribution.
 	mt19937 mersenne_engine(rnd_device());
 	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
 
@@ -122,9 +121,7 @@ void testPerformance256()
 	uint64_t t_end;
 	uint64_t freq;
 
-	// First create an instance of an engine.
 	random_device rnd_device;
-	// Specify the engine and distribution.
 	mt19937 mersenne_engine(rnd_device());
 	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
 
@@ -168,9 +165,7 @@ const int testFunctionality256()
 	char* hash = new char[HASH_SIZE_BYTE * NUM_MESSAGES];
 	char* hash_ref = new char[HASH_SIZE_BYTE * NUM_MESSAGES];
 
-	// First create an instance of an engine.
 	random_device rnd_device;
-	// Specify the engine and distribution.
 	mt19937 mersenne_engine(rnd_device());
 	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
 
@@ -195,6 +190,12 @@ const int testFunctionality256()
 	return status;
 }
 
+void testMerkleTree()
+{
+	char* tree;
+	harakaBuildMerkleTree(tree, TREE_DEPTH);
+}
+
 int testOTS()
 {
 	float sum = 0;
@@ -204,9 +205,7 @@ int testOTS()
 	uint64_t t_end;
 	uint64_t freq;
 
-	// First create an instance of an engine.
 	random_device rnd_device;
-	// Specify the engine and distribution.
 	mt19937 mersenne_engine(rnd_device());
 	uniform_int_distribution<int> dist(CHAR_MIN, CHAR_MAX);
 
@@ -310,6 +309,10 @@ int main()
 		cout << FAILED_TO_ACQUIRE_CRYPT_PROV_STRING << endl;
 	else if (status == FAILED_TO_GENERATE_CRYPT_RAND_BYTES)
 		cout << FAILED_TO_GENERATE_CRYPT_RAND_BYTES_STRING << endl;
+#endif
+
+#ifdef TEST_MERKLE_TREE
+	testMerkleTree();
 #endif
 
 	// cudaDeviceReset must be called before exiting in order for profiling and

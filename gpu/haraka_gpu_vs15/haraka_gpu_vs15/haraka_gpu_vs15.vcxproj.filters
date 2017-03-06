@@ -15,6 +15,9 @@
     <ClCompile Include="helper.cpp">
       <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="haraka_cuda_wrapper.cu">
+      <Filter>Source</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="constants.h">
@@ -27,6 +30,9 @@
       <Filter>Header</Filter>
     </ClInclude>
     <ClInclude Include="haraka_cuda.h">
+      <Filter>Header</Filter>
+    </ClInclude>
+    <ClInclude Include="haraka_cuda_wrapper.h">
       <Filter>Header</Filter>
     </ClInclude>
   </ItemGroup>
