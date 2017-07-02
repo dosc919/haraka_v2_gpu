@@ -813,3 +813,155 @@ __global__ void harakaOTSCreateVerificationKernel(const uint64_t* signature, uin
 
 	reinterpret_cast<uint4*>(verification)[2 * TX + 1] = reinterpret_cast<uint4*>(load)[1];
 }
+
+
+#define GLOBAL_LOAD_SHARED_SETUP_MERKLE \
+		register uint32_t r0, r1, r2, r3; \
+		register uint32_t s0, s1, s2, s3; \
+		register uint32_t t0, t1, t2, t3; \
+		register uint32_t u0, u1, u2, u3; \
+		register uint32_t v0, v1, v2, v3; \
+		register uint64_t load[2]; \
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(tree)[(childs - 1) * 2 + 4 * TX]; \
+		s0 = load[0]; \
+		s1 = load[0] >> 32; \
+		s2 = load[1]; \
+		s3 = load[1] >> 32; \
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(tree)[(childs - 1) * 2 + 4 * TX + 1]; \
+		t0 = load[0]; \
+		t1 = load[0] >> 32; \
+		t2 = load[1]; \
+		t3 = load[1] >> 32;\
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(tree)[(childs - 1) * 2 + 4 * TX + 2]; \
+		u0 = load[0]; \
+		u1 = load[0] >> 32; \
+		u2 = load[1]; \
+		u3 = load[1] >> 32;\
+		reinterpret_cast<uint4*>(load)[0] = reinterpret_cast<const uint4*>(tree)[(childs - 1) * 2 + 4 * TX + 3]; \
+		v0 = load[0]; \
+		v1 = load[0] >> 32; \
+		v2 = load[1]; \
+		v3 = load[1] >> 32;
+
+__global__ void harakaBuildMerkleTree(uint64_t* tree, const uint32_t num_parents, const uint32_t depth)
+{
+	COPY_CONSTANT_SHARED_ENC
+
+	if (TX >= (num_parents))
+		return;
+
+	uint32_t childs = num_parents * 2;
+
+	GLOBAL_LOAD_SHARED_SETUP_MERKLE
+
+	for (int s = 1; s < (1 << depth); s *= 2)
+	{
+		if ((threadIdx.x % s) == 0)
+		{
+			AES_ENC_ROUND(0, r, s);
+			AES_ENC_ROUND(16, s, r);
+
+			AES_ENC_ROUND(1 * 4, r, t);
+			AES_ENC_ROUND(1 * 4 + 16, t, r);
+
+			AES_ENC_ROUND(2 * 4, r, u);
+			AES_ENC_ROUND(2 * 4 + 16, u, r);
+
+			AES_ENC_ROUND(3 * 4, r, v);
+			AES_ENC_ROUND(3 * 4 + 16, v, r);
+
+			MIX_512
+
+			AES_ENC_ROUND(0 * 4 + 32, r, s);
+			AES_ENC_ROUND(0 * 4 + 48, s, r);
+
+			AES_ENC_ROUND(1 * 4 + 32, r, t);
+			AES_ENC_ROUND(1 * 4 + 48, t, r);
+
+			AES_ENC_ROUND(2 * 4 + 32, r, u);
+			AES_ENC_ROUND(2 * 4 + 48, u, r);
+
+			AES_ENC_ROUND(3 * 4 + 32, r, v);
+			AES_ENC_ROUND(3 * 4 + 48, v, r);
+
+			MIX_512
+
+			AES_ENC_ROUND(0 * 4 + 64, r, s);
+			AES_ENC_ROUND(0 * 4 + 80, s, r);
+
+			AES_ENC_ROUND(1 * 4 + 64, r, t);
+			AES_ENC_ROUND(1 * 4 + 80, t, r);
+
+			AES_ENC_ROUND(2 * 4 + 64, r, u);
+			AES_ENC_ROUND(2 * 4 + 80, u, r);
+
+			AES_ENC_ROUND(3 * 4 + 64, r, v);
+			AES_ENC_ROUND(3 * 4 + 80, v, r);
+
+			MIX_512
+
+			AES_ENC_ROUND(0 * 4 + 96, r, s);
+			AES_ENC_ROUND(0 * 4 + 112, s, r);
+
+			AES_ENC_ROUND(1 * 4 + 96, r, t);
+			AES_ENC_ROUND(1 * 4 + 112, t, r);
+
+			AES_ENC_ROUND(2 * 4 + 96, r, u);
+			AES_ENC_ROUND(2 * 4 + 112, u, r);
+
+			AES_ENC_ROUND(3 * 4 + 96, r, v);
+			AES_ENC_ROUND(3 * 4 + 112, v, r);
+
+			MIX_512
+
+			AES_ENC_ROUND(0 * 4 + 128, r, s);
+			AES_ENC_ROUND(0 * 4 + 144, s, r);
+
+			AES_ENC_ROUND(1 * 4 + 128, r, t);
+			AES_ENC_ROUND(1 * 4 + 144, t, r);
+
+			AES_ENC_ROUND(2 * 4 + 128, r, u);
+			AES_ENC_ROUND(2 * 4 + 144, u, r);
+
+			AES_ENC_ROUND(3 * 4 + 128, r, v);
+			AES_ENC_ROUND(3 * 4 + 144, v, r);
+
+			MIX_512
+
+			load[1] = s2 | ((uint64_t)s3) << 32;
+			load[1] ^= tree[(childs - 1) * 4 + 8 * TX / s + 1];
+			tree[(childs / 2 - 1) * 4 + TX / s * 4] = load[1];
+			s0 = load[1];
+			s1 = load[1] >> 32;
+
+			load[1] = t2 | ((uint64_t)t3) << 32;
+			load[1] ^= tree[(childs - 1) * 4 + 8 * TX / s + 3];
+			tree[(childs / 2 - 1) * 4 + TX / s * 4 + 1] = load[1];
+			s2 = load[1];
+			s3 = load[1] >> 32;
+
+			load[1] = u0 | ((uint64_t)u1) << 32;
+			load[1] ^= tree[(childs - 1) * 4 + 8 * TX / s + 4];
+			tree[(childs / 2 - 1) * 4 + TX / s * 4 + 2] = load[1];
+			t0 = load[1];
+			t1 = load[1] >> 32;
+
+			load[1] = v0 | ((uint64_t)v1) << 32;
+			load[1] ^= tree[(childs - 1) * 4 + 8 * TX / s + 6];
+			tree[(childs / 2 - 1) * 4 + TX / s * 4 + 3] = load[1];
+			t2 = load[1];
+			t3 = load[1] >> 32;
+
+			u0 = __shfl_down(s0, s);
+			u1 = __shfl_down(s1, s);
+			u2 = __shfl_down(s2, s);
+			u3 = __shfl_down(s3, s);
+			v0 = __shfl_down(t0, s);
+			v1 = __shfl_down(t1, s);
+			v2 = __shfl_down(t2, s);
+			v3 = __shfl_down(t3, s);
+
+			childs = childs >> 1;
+		}
+	}
+}

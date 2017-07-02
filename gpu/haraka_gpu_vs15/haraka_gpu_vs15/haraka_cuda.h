@@ -75,4 +75,15 @@ __global__ void harakaOTSCreateSignatureKernel(const uint64_t* priv_key, uint64_
 // public keys (verification keys).
 __global__ void harakaOTSCreateVerificationKernel(const uint64_t* signature, uint64_t* verification, uint8_t* b, const uint32_t num_chunks);
 
+
+// Input
+// hashes_per_thread...number of hashes that are calculated per thread
+// num_hashes..........number of hashes that need to be calculated for the whole tree
+// Output
+// tree................merkle tree
+// Description
+// Creates the merkle with haraka as the hash function. The tree should already contain the
+// hashes of the public key (verification key) as the leaves.
+__global__ void harakaBuildMerkleTree(uint64_t* tree, const uint32_t num_parents, const uint32_t depth);
+
 #endif

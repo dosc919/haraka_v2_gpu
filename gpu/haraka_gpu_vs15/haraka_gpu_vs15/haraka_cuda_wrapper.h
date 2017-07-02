@@ -21,6 +21,9 @@ const uint32_t T1 = (HASH_SIZE_BIT + WINTERNITZ_PARAM - 1) / WINTERNITZ_PARAM;
 const uint32_t T2 = (int(log2f(float(T1))) + WINTERNITZ_PARAM + WINTERNITZ_PARAM - 1) / WINTERNITZ_PARAM;
 const uint32_t T = T1 + T2;
 
+//Merkle Tree defines
+const uint32_t DEPTH_PER_KERNEL = 6;
+
 const int32_t FAILED_TO_ACQUIRE_CRYPT_PROV = -1;
 const int32_t FAILED_TO_GENERATE_CRYPT_RAND_BYTES = -2;
 const int32_t SUCCESS = 0;
@@ -52,6 +55,8 @@ cudaError_t harakaCuda256(const char* msgs, char* hashes, const uint32_t num_msg
 //-----------------------------------------------------------------------------
 //Winternitz OTS Wrapper functions
 
+//Works only for Windows, because of the secure random number generator
+
 // Input
 // msgs........messages for which the signature is created. Has to be num_msgs times 256-bit large.
 // num_msgs....number of messages that should be signed.
@@ -62,7 +67,24 @@ cudaError_t harakaCuda256(const char* msgs, char* hashes, const uint32_t num_msg
 // Descritpion
 // Creates the signatures and the corresponding public keys (verification keys) for the
 // input messages.
+#ifdef _WIN32
 int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys, const uint32_t num_msgs);
+#endif
+
+
+// Should work on all OS, because of external private key generation.
+
+// Input
+// msgs........messages for which the signature is created. Has to be num_msgs times 256-bit large.
+// num_msgs....number of messages that should be signed.
+// Output
+// signature...signatures of the input messages. Has to be num_msgs times 34 times 256-bit large.
+// pub_key.....public keys (verification keys) for the corresponding signature - message pairs.
+//             Has to be num_msgs times 34 times 256-bit large.
+// Descritpion
+// Creates the signatures and the corresponding public keys (verification keys) for the
+// input messages from the private keys (signature keys).
+int harakaWinternitzCudaSign(const char* msgs, const char* priv_keys, char* signatures, char* pub_keys, const uint32_t num_msgs);
 
 
 // Input
@@ -85,9 +107,10 @@ int harakaWinternitzCudaVerify(const char* msgs, const char* signatures, const c
 // Input
 // depth...depth of the Merkle tree that should be created
 // Output
-// tree....Merkle tree of the given depth
+// tree....Merkle tree of the given depth, the leaves should already be populatet with the hashes of the public keys (verification keys)
+//         from tree[(1 << depth) - 1] to tree[(1 << (depth + 1)) - 2]
 // Description
 // Builds the Merkle Tree of the given depth.
-int harakaBuildMerkleTree(const char* tree, const uint32_t depth);
+int harakaBuildMerkleTree(char* tree, const uint32_t depth);
 
 #endif

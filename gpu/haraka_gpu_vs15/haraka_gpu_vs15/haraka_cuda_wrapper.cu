@@ -2,9 +2,12 @@
 #include "haraka_cuda_wrapper.h"
 
 #include <iostream>
-#include <Windows.h>
-#include <wincrypt.h>
 #include <cassert>
+
+#ifdef _WIN32
+	#include <Windows.h>
+	#include <wincrypt.h>
+#endif
 
 
 #define checkCudaError(x) _checkCudaError(x, __FILE__, __LINE__)
@@ -118,7 +121,7 @@ cudaError_t harakaCuda256(const char* msgs, char* hashes, const uint32_t num_msg
 }
 
 
-
+#ifdef _WIN32
 int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys, const uint32_t num_msgs)
 {
 	uint32_t msgs_per_stream = num_msgs / NUM_STREAMS;
@@ -207,6 +210,83 @@ int harakaWinternitzCudaSign(const char* msgs, char* signatures, char* pub_keys,
 
 	return SUCCESS;
 }
+#endif
+
+int harakaWinternitzCudaSign(const char* msgs, const char* priv_keys, char* signatures, char* pub_keys, const uint32_t num_msgs)
+{
+	uint32_t msgs_per_stream = num_msgs / NUM_STREAMS;
+	uint32_t remaining_msgs = num_msgs - NUM_STREAMS * msgs_per_stream;
+	uint32_t msgs_to_alloc = msgs_per_stream ? msgs_per_stream : remaining_msgs;
+
+	uint32_t grid_size_haraka = (msgs_to_alloc + MAX_THREAD - 1) / MAX_THREAD;
+	uint32_t grid_size_winternitz = (T * msgs_to_alloc + MAX_THREAD - 1) / MAX_THREAD;
+	dim3 block_dim(MAX_THREAD);
+
+	cudaStream_t streams[NUM_STREAMS];
+
+	char* msg_device;
+	checkCudaError(cudaMalloc((void**)&msg_device, MSG_SIZE_BYTE_256 * msgs_to_alloc * sizeof(char)));
+
+	char* b_device;
+	checkCudaError(cudaMalloc((void**)&b_device, T * msgs_to_alloc * sizeof(char)));
+
+	char* private_key_device;
+	checkCudaError(cudaMalloc((void**)&private_key_device, T * HASH_SIZE_BYTE * msgs_to_alloc * sizeof(char)));
+
+	char* public_key_device;
+	checkCudaError(cudaMalloc((void**)&public_key_device, T * HASH_SIZE_BYTE * msgs_to_alloc * sizeof(char)));
+
+	char* signature_device;
+	checkCudaError(cudaMalloc((void**)&signature_device, T * HASH_SIZE_BYTE * msgs_to_alloc * sizeof(char)));
+
+	for (int i = 0; i < NUM_STREAMS; ++i)
+	{
+		cudaStreamCreate(&streams[i]);
+
+		checkCudaError(cudaMemcpyAsync((void *)msg_device, &msgs[MSG_SIZE_BYTE_256 * msgs_per_stream * i], MSG_SIZE_BYTE_256 * msgs_per_stream, cudaMemcpyHostToDevice, streams[i]));
+
+		checkCudaError(cudaDeviceSynchronize());
+		harakaOTSKernel << <grid_size_haraka, block_dim, 0, streams[i] >> >((uint64_t*)msg_device, (uint16_t*)b_device, msgs_per_stream);
+
+		checkCudaError(cudaMemcpyAsync((void *)private_key_device, priv_keys, T * HASH_SIZE_BYTE * msgs_per_stream, cudaMemcpyHostToDevice, streams[i]));
+
+		harakaOTSCreateSignatureKernel << <grid_size_winternitz, block_dim, 0, streams[i] >> > ((uint64_t*)private_key_device, (uint64_t*)public_key_device, (uint64_t*)signature_device, (uint8_t*)b_device, T * msgs_per_stream);
+
+		checkCudaError(cudaMemcpyAsync(&signatures[T * HASH_SIZE_BYTE * msgs_per_stream * i], signature_device, T * HASH_SIZE_BYTE * msgs_per_stream, cudaMemcpyDeviceToHost, streams[i]));
+
+		checkCudaError(cudaMemcpyAsync(&pub_keys[T * HASH_SIZE_BYTE * msgs_per_stream * i], public_key_device, T * HASH_SIZE_BYTE * msgs_per_stream, cudaMemcpyDeviceToHost, streams[i]));
+	}
+
+	if (remaining_msgs > 0)
+	{
+		cudaStream_t rem_stream;
+		cudaStreamCreate(&rem_stream);
+
+		checkCudaError(cudaMemcpyAsync((void *)msg_device, &msgs[MSG_SIZE_BYTE_256 * msgs_per_stream * NUM_STREAMS], MSG_SIZE_BYTE_256 * remaining_msgs, cudaMemcpyHostToDevice, rem_stream));
+
+		checkCudaError(cudaDeviceSynchronize());
+		harakaOTSKernel << <grid_size_haraka, block_dim, 0, rem_stream >> >((uint64_t*)msg_device, (uint16_t*)b_device, remaining_msgs);
+
+		checkCudaError(cudaMemcpyAsync((void *)private_key_device, priv_keys, T * HASH_SIZE_BYTE * remaining_msgs, cudaMemcpyHostToDevice, rem_stream));
+
+		harakaOTSCreateSignatureKernel << <grid_size_winternitz, block_dim, 0, rem_stream >> > ((uint64_t*)private_key_device, (uint64_t*)public_key_device, (uint64_t*)signature_device, (uint8_t*)b_device, remaining_msgs * T);
+
+		checkCudaError(cudaMemcpyAsync(&pub_keys[T * HASH_SIZE_BYTE * msgs_per_stream * NUM_STREAMS], public_key_device, T * HASH_SIZE_BYTE * remaining_msgs, cudaMemcpyDeviceToHost, rem_stream));
+
+		checkCudaError(cudaMemcpyAsync(&signatures[T * HASH_SIZE_BYTE * msgs_per_stream * NUM_STREAMS], signature_device, T * HASH_SIZE_BYTE * remaining_msgs, cudaMemcpyDeviceToHost, rem_stream));
+	}
+
+	checkCudaError(cudaGetLastError());
+	checkCudaError(cudaDeviceSynchronize());
+
+	cudaFree(msg_device);
+	cudaFree(b_device);
+	cudaFree(private_key_device);
+	cudaFree(public_key_device);
+	cudaFree(signature_device);
+
+	return SUCCESS;
+}
 
 
 int harakaWinternitzCudaVerify(const char* msgs, const char* signatures, const char* pub_keys, const uint32_t num_msgs)
@@ -280,15 +360,48 @@ int harakaWinternitzCudaVerify(const char* msgs, const char* signatures, const c
 	return verified;
 }
 
-int harakaBuildMerkleTree(const char* tree, const uint32_t depth)
+int harakaBuildMerkleTree(char* tree, const uint32_t depth)
 {
-	//generate private keys
+	uint32_t num_nodes = (1 << (depth + 1)) - 1;
 
-	//get public keys
+	char* tree_device;
+	checkCudaError(cudaMalloc((void**)&tree_device, HASH_SIZE_BYTE * num_nodes * sizeof(char)));
 
-	//create hashes
+	checkCudaError(cudaMemcpyAsync((void *)&tree_device[((1 << depth) - 1) * HASH_SIZE_BYTE], &tree[((1 << depth) - 1) * HASH_SIZE_BYTE], (1 << depth) * HASH_SIZE_BYTE, cudaMemcpyHostToDevice));
 
-	//build tree
+	dim3 block_dim(MAX_THREAD);
+
+	uint32_t rounds = depth / DEPTH_PER_KERNEL;
+	uint32_t remaining_depth = depth;
+
+	if (DEPTH_PER_KERNEL * rounds < depth)
+	{
+		uint32_t depth_first_kernel = depth - DEPTH_PER_KERNEL * rounds;
+		uint32_t num_current_parents = (1 << (remaining_depth - 1));
+
+		remaining_depth -= depth_first_kernel;
+
+		uint32_t grid_size = (num_current_parents + MAX_THREAD - 1) / MAX_THREAD;
+
+		harakaBuildMerkleTree << <grid_size, block_dim>> > ((uint64_t*)tree_device, num_current_parents, depth_first_kernel);
+	}
+
+	for (uint32_t i = 0; i < rounds; ++i)
+	{
+		uint32_t num_current_parents = (1 << (remaining_depth - 1));
+		remaining_depth -= 6;
+
+		uint32_t grid_size = (num_current_parents + MAX_THREAD - 1) / MAX_THREAD;
+
+		harakaBuildMerkleTree << <grid_size, block_dim>> > ((uint64_t*)tree_device, num_current_parents, DEPTH_PER_KERNEL);
+	}
+
+	checkCudaError(cudaMemcpyAsync(&tree[0], (void *)&tree_device[0], ((1 << depth) - 1) * HASH_SIZE_BYTE, cudaMemcpyDeviceToHost));
+
+	checkCudaError(cudaGetLastError());
+	checkCudaError(cudaDeviceSynchronize());
+
+	cudaFree(tree_device);
 
 	return SUCCESS;
 }
