@@ -1,0 +1,28 @@
+File organization:
+main.cpp
+  contains testing functions for all implemented cuda functions
+  uses windows specific includes and may not run in linux
+
+constants.h
+  contains defines used in main.cpp
+  
+helper.cpp
+  contains helper functions used in main.cpp
+  
+harak_cuda_wrapper.cu
+  contains the wrapper functions for the cuda kernels
+  this functions should be called when a specific algorithm
+  should be executed
+  they will call the corresponding cuda kernel from haraka_cuda.cu
+  the signing with the Winternitz signature scheme and build in
+  private key generation only works under windows system, because
+  of the windows specific secure random number genrator
+  under linux the private keys have to be suplied in the function header
+  
+haraka_cuda.cu
+  contains the cuda kernels
+
+haraka_cuda_w_options.cu
+  contains the wrapper function and cuda kernel for haraka-512
+  with options to switch between different memory types for the
+  the T-tables and round constatns as well as different granularity
