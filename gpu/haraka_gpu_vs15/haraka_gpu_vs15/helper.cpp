@@ -24,14 +24,6 @@ void printVector(const string& message, const char* vec_to_print, uint32_t size)
 	}
 }
 
-void loop_hash_2n_n(char* out, const char* in, uint64_t loops)
-{
-	for (int i = 0; i < loops; ++i)
-	{
-		haraka512256(out + i * 32, in + i * 2 * 32);
-	}
-}
-
 int haraka512256(char *hash, const char *msg)
 {
 	// stuff we need

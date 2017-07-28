@@ -14,11 +14,11 @@
 
 using namespace std;
 
-const uint32_t NUM_MESSAGES = 200000;//200000;//4194304; //128MB input for haraka256 and 256MB input for haraka 512
-const uint32_t NUM_MEASURMENTS = 1;
-const uint32_t TREE_DEPTH = 18;
+const uint32_t NUM_MESSAGES = 4194304;//200000;//4194304; //128MB input for haraka256 and 256MB input for haraka 512
+const uint32_t NUM_MEASURMENTS = 10;
+const uint32_t TREE_DEPTH = 21;
 
-//#define TEST_PERFORMANCE_512
+#define TEST_PERFORMANCE_512
 //#define TEST_FUNCTIONALITY_512
 
 //#define TEST_PERFORMANCE_256
@@ -27,7 +27,7 @@ const uint32_t TREE_DEPTH = 18;
 //#define TEST_OTS
 //#define TEST_OTS_EXTERNAL_PRIVATE_KEY
 
-#define TEST_MERKLE_TREE
+//#define TEST_MERKLE_TREE
 
 
 int cmp_f(const void *x, const void *y)
@@ -210,9 +210,6 @@ int testOTS()
 
 	int status;
 
-	int registers[4];
-	unsigned int aux[32];
-
 	for (int j = 0; j < NUM_MEASURMENTS; ++j)
 	{
 		char* input;
@@ -226,18 +223,12 @@ int testOTS()
 
 		generate(input, input + MSG_SIZE_BYTE_256 * NUM_MESSAGES - 1, gen);
 
-		//QueryPerformanceCounter((LARGE_INTEGER *)&t_begin);
-		__cpuid(registers, 0);
-		t_begin = __rdtsc();
+		QueryPerformanceCounter((LARGE_INTEGER *)&t_begin);
 
 		status = harakaWinternitzCudaSign(input, signatures, pub_keys, NUM_MESSAGES);
 
-		t_end = __rdtscp(aux);
-		__cpuid(registers, 0);
-
-
-		//QueryPerformanceCounter((LARGE_INTEGER *)&t_end);
-		//QueryPerformanceFrequency((LARGE_INTEGER *)&freq);
+		QueryPerformanceCounter((LARGE_INTEGER *)&t_end);
+		QueryPerformanceFrequency((LARGE_INTEGER *)&freq);
 
 		if (status)
 		{
@@ -248,7 +239,7 @@ int testOTS()
 			return status;
 		}
 
-		times[j] = ((t_end - t_begin));// *1000.0f / freq);
+		times[j] = ((t_end - t_begin) * 1000.0f / freq);
 
 		if (j > 1)
 			sum += times[j];
@@ -376,54 +367,20 @@ void testMerkleTree()
 		generate(tree + ((1 << TREE_DEPTH) - 1) * HASH_SIZE_BYTE, tree + ((1 << (TREE_DEPTH + 1)) - 1) * HASH_SIZE_BYTE - 1, gen);
 		tree[((1 << TREE_DEPTH) - 1) * HASH_SIZE_BYTE] = j;
 
-		char* tree_cpu = new char[((1 << (TREE_DEPTH + 1)) - 1) * HASH_SIZE_BYTE];
-		memcpy(&tree_cpu[((1 << TREE_DEPTH) - 1) * HASH_SIZE_BYTE], tree + ((1 << TREE_DEPTH) - 1) * HASH_SIZE_BYTE, (1 << TREE_DEPTH) * HASH_SIZE_BYTE);
-		for (int level = 0; level < TREE_DEPTH; ++level)
-		{
-			uint64_t parents = (1 << TREE_DEPTH - level - 1);
-			loop_hash_2n_n(&tree_cpu[(parents - 1) * HASH_SIZE_BYTE], &tree_cpu[(2 * parents - 1) * HASH_SIZE_BYTE], parents);
-		}
-		printf("done\n");
-
 		QueryPerformanceCounter((LARGE_INTEGER *)&t_begin);
 
 		harakaBuildMerkleTree(tree, TREE_DEPTH);
 
 		QueryPerformanceCounter((LARGE_INTEGER *)&t_end);
 		QueryPerformanceFrequency((LARGE_INTEGER *)&freq);
-		printf("done\n");
-		times[j] = ((t_end - t_begin) * 1000.0f / freq);
+
+		times[j] = ((t_end - t_begin) *1000.0f / freq);
 
 		if (j > 1)
 			sum += times[j];
 
 		cout << times[j] << endl;
 
-
-		/*for (int i = 0; i <= TREE_DEPTH; ++i)
-		{
-			int num_nodes = 1 << i;
-			for (int j = 0; j < num_nodes; ++j)
-			{
-				for (int k = 0; k < HASH_SIZE_BYTE; ++k)
-					printf("%02x", (unsigned char)tree[((1 << i) - 1 + j) * HASH_SIZE_BYTE + k]);
-
-				printf(" ");
-			}
-			printf("\n");
-			for (int j = 0; j < num_nodes; ++j)
-			{
-				for (int k = 0; k < HASH_SIZE_BYTE; ++k)
-					printf("%02x", (unsigned char)tree_cpu[((1 << i) - 1 + j) * HASH_SIZE_BYTE + k]);
-
-				printf(" ");
-			}
-			printf("\n");
-		}*/
-
-		printf("equal: %s\n", memcmp(&tree[0], &tree_cpu[0], ((1 << (TREE_DEPTH + 1)) - 1) * HASH_SIZE_BYTE)?"false":"true");
-
-		delete tree_cpu;
 		cudaFreeHost(tree);
 	}
 
@@ -497,12 +454,8 @@ int main()
 	cudaError_t cudaStatus = cudaDeviceReset();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaDeviceReset failed!");
-		while (1) {}
 		return 1;
 	}
-
-
-	while (1) {}
 
 	return 0;
 }
